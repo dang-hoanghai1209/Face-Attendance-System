@@ -1,0 +1,101 @@
+/* ═══════════════════════════════════════════════
+   NTU Face Attendance — Dark Theme
+   Font: Be Vietnam Pro (Google Fonts)
+═══════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Màu nền */
+  --navy:     #0d1b2a;
+  --navy2:    #112236;
+  --navy3:    #1a2f45;
+  --navy4:    #243b55;
+
+  /* Accent */
+  --teal:     #00c9a7;
+  --teal2:    #00a88c;
+  --teal-g:   rgba(0,201,167,.15);
+
+  /* Semantic */
+  --blue:     #3b82f6;
+  --amber:    #f59e0b;
+  --red:      #f43f5e;
+  --purple:   #a78bfa;
+  --green:    #34d399;
+
+  /* Text */
+  --white:    #e8f0f8;
+  --white2:   #b8cad8;
+  --muted:    #637e94;
+
+  /* Border */
+  --bdr:      rgba(255,255,255,.07);
+  --bdr2:     rgba(255,255,255,.13);
+
+  /* Card */
+  --card:     rgba(255,255,255,.035);
+  --card2:    rgba(255,255,255,.065);
+
+  /* Misc */
+  --r:        12px;
+  --r-sm:     8px;
+  --font:     'Be Vietnam Pro', system-ui, sans-serif;
+  --mono:     'JetBrains Mono', monospace;
+  --shadow:   0 24px 48px rgba(0,0,0,.4);
+
+  /* Legacy aliases — giữ để các page cũ không lỗi */
+  --primary:       var(--teal);
+  --primary-dark:  var(--teal2);
+  --accent:        var(--blue);
+  --text:          var(--white);
+  --surface:       var(--navy2);
+  --surface-soft:  var(--navy3);
+  --border:        var(--bdr2);
+  --border-strong: var(--bdr2);
+  --success:       var(--green);
+  --warning:       var(--amber);
+  --danger:        var(--red);
+  --bg:            var(--navy);
+  --radius:        var(--r-sm);
+}
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 14px; }
+
+body {
+  font-family: var(--font);
+  background: var(--navy);
+  color: var(--white);
+  line-height: 1.5;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+  /* Noise texture */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.022'/%3E%3C/svg%3E");
+}
+
+/* Ambient glow top */
+body::before {
+  content: '';
+  position: fixed; top: -300px; left: 50%;
+  transform: translateX(-50%);
+  width: 900px; height: 600px;
+  background: radial-gradient(ellipse, rgba(0,201,167,.09) 0%, transparent 65%);
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Base elements ── */
+button, input, select, textarea { font: inherit; }
+
+#root { min-height: 100vh; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--navy4); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }

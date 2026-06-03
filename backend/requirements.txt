@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-dotenv
+psycopg2-binary
+pillow
+torch
+facenet-pytorch
+pandas
+openpyxl
+reportlab
+python-multipart
+matplotlib

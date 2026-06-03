@@ -1,0 +1,50 @@
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Python
+backend/.venv/
+backend/venv/
+backend/env/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+
+# Frontend / Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Env / secrets
+.env
+*.env
+backend/.env
+frontend/.env
+
+# Logs
+*.log
+backend/*.log
+frontend/*.log
+
+# Generated reports/files
+backend/reports/
+backend/exports/
+
+# Face data / private data / embeddings
+backend/data/*.pkl
+backend/enrollment_data/
+backend/evaluation_data/
+backend/media/
+backend/uploads/
+
+# Local DB
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache/temp
+.cache/
+tmp/
+temp/

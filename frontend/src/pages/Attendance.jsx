@@ -53,30 +53,36 @@ const formatDT = (iso) => {
 const formatConf = (v) =>
   typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '-'
 
+const isClassMismatchRecognition = (recognition) =>
+  recognition?.reason === 'class_mismatch' ||
+  recognition?.official_attendance_warning_code === 'class_mismatch' ||
+  recognition?.requires_manual_confirmation === true
+
+const getClassMismatchMessage = (student, session) =>
+  `Sinh viên thuộc lớp ${student?.class_name || '-'}, khác lớp chính của buổi học ${session?.class_name || '-'}. Nếu sinh viên có đăng ký/học ghép buổi này, giảng viên có thể xác nhận thủ công để ghi nhận điểm danh.`
+
 export default function Attendance() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const canDeleteAttendance = user?.role === 'admin' || user?.role === 'teacher'
   const videoRef  = useRef(null)
   const canvasRef = useRef(null)
 
   const [stream,             setStream]             = useState(null)
   const [sessions,           setSessions]           = useState([])
-  const [students,           setStudents]           = useState([])
   const [sessionId,          setSessionId]          = useState('')
   const [action,             setAction]             = useState('checkin')
-  const [manualStudentCode,  setManualStudentCode]  = useState('')
-  const [manualNote,         setManualNote]         = useState('')
   const [sessionAttendance,  setSessionAttendance]  = useState([])
   const [result,             setResult]             = useState(null)
   const [pendingRecognition, setPendingRecognition] = useState(null)
   const [loading,            setLoading]            = useState(false)
+  const [deletingRecordId,    setDeletingRecordId]    = useState(null)
   const [message,            setMessage]            = useState('')
   const [mode,               setMode]               = useState('official')
   const [testFile,           setTestFile]           = useState(null)
   const [testPreviewUrl,     setTestPreviewUrl]     = useState('')
   const [testResult,         setTestResult]         = useState(null)
   const [testLoading,        setTestLoading]        = useState(false)
-  const officialStudents = useMemo(() => students.filter(isOfficialStudent), [students])
   const selectedSession = useMemo(
     () => sessions.find((session) => String(session.id) === String(sessionId)),
     [sessions, sessionId],
@@ -85,17 +91,10 @@ export default function Attendance() {
   // ── Load dữ liệu ban đầu ──────────────────────────────────────── //
   const loadBaseData = async () => {
     try {
-      const [sessionRes, studentRes] = await Promise.all([
-        api.get('/sessions/'),
-        api.get('/students/'),
-      ])
+      const sessionRes = await api.get('/sessions/')
       setSessions(sessionRes.data)
-      setStudents(studentRes.data)
       if (!sessionId && sessionRes.data.length > 0)
         setSessionId(String(sessionRes.data[0].id))
-      const firstOfficialStudent = studentRes.data.find(isOfficialStudent)
-      if (!manualStudentCode && firstOfficialStudent)
-        setManualStudentCode(firstOfficialStudent.student_code)
     } catch (err) {
       setMessage(getApiErrorMessage(err, 'Không tải được dữ liệu điểm danh.'))
     }
@@ -115,18 +114,11 @@ export default function Attendance() {
     let mounted = true
     const init = async () => {
       try {
-        const [sessionRes, studentRes] = await Promise.all([
-          api.get('/sessions/'),
-          api.get('/students/'),
-        ])
+        const sessionRes = await api.get('/sessions/')
         if (!mounted) return
         setSessions(sessionRes.data)
-        setStudents(studentRes.data)
         if (sessionRes.data.length > 0)
           setSessionId((cur) => cur || String(sessionRes.data[0].id))
-        const firstOfficialStudent = studentRes.data.find(isOfficialStudent)
-        if (firstOfficialStudent)
-          setManualStudentCode((cur) => cur || firstOfficialStudent.student_code)
       } catch (err) {
         if (mounted) setMessage(getApiErrorMessage(err, 'Không tải được dữ liệu điểm danh.'))
       }
@@ -191,20 +183,36 @@ export default function Attendance() {
     if (!pendingRecognition) return
     setLoading(true)
     try {
-      await postAttendanceAction(
-        pendingRecognition.studentCode,
-        pendingRecognition.confidence,
-        pendingRecognition.action,
-      )
+      if (pendingRecognition.requiresManualConfirmation) {
+        const manualPayload = {
+          student_code: pendingRecognition.studentCode,
+          session_id: Number(sessionId),
+          audit_id: pendingRecognition.auditId,
+          note: 'Xác nhận thủ công sau khi quét mặt khác lớp.',
+        }
+        if (import.meta.env.DEV) {
+          console.debug('manual class mismatch confirmation payload', manualPayload)
+        }
+        await api.post('/attendance/manual', manualPayload)
+      } else {
+        await postAttendanceAction(
+          pendingRecognition.studentCode,
+          pendingRecognition.confidence,
+          pendingRecognition.action,
+        )
+      }
+      const successMessage = pendingRecognition.requiresManualConfirmation
+        ? `Đã xác nhận thủ công cho ${pendingRecognition.studentCode}.`
+        : `Đã ghi nhận ${actionLabels[pendingRecognition.action]} cho ${pendingRecognition.studentCode}.`
       setResult({
         success: true, status: 'success',
         studentCode: pendingRecognition.studentCode,
         student: pendingRecognition.student,
         confidence:  pendingRecognition.confidence,
         action: pendingRecognition.action,
-        message: `Đã ghi nhận ${actionLabels[pendingRecognition.action]} cho ${pendingRecognition.studentCode}.`,
+        message: successMessage,
       })
-      setMessage(`Đã ghi nhận ${actionLabels[pendingRecognition.action]} cho ${pendingRecognition.studentCode}.`)
+      setMessage(successMessage)
       setPendingRecognition(null)
       await loadSessionAttendance(sessionId)
     } catch (err) {
@@ -216,7 +224,7 @@ export default function Attendance() {
 
   const rejectPendingRecognition = () => {
     setPendingRecognition(null)
-    setMessage('Đã hủy. Có thể thử lại hoặc điểm danh thủ công.')
+    setMessage('Đã hủy. Có thể quét lại để ghi nhận điểm danh.')
   }
 
   const captureAndProcess = async () => {
@@ -248,6 +256,9 @@ export default function Attendance() {
 
       try {
         const recRes = await api.post('/recognize', formData)
+        if (import.meta.env.DEV) {
+          console.debug('recognize response payload', recRes.data)
+        }
         const {
           status,
           student_code,
@@ -256,11 +267,36 @@ export default function Attendance() {
           message: msg,
           official_attendance_allowed,
           official_attendance_warning,
+          audit_id,
+          requires_manual_confirmation,
+          reason,
+          official_attendance_warning_code,
         } = recRes.data
         const recognizedStudent = student || null
         const recognizedCode = recognizedStudent?.student_code || student_code
+        const classMismatch = isClassMismatchRecognition({
+          reason,
+          official_attendance_warning_code,
+          requires_manual_confirmation,
+        })
+        const classMismatchMessage = getClassMismatchMessage(recognizedStudent, selectedSession)
         const blockMessage = official_attendance_warning ||
           (recognizedStudent && !isOfficialStudent(recognizedStudent) ? OFFICIAL_BLOCK_MESSAGE : '')
+
+        if (recognizedCode && classMismatch && audit_id) {
+          setPendingRecognition({
+            studentCode: recognizedCode,
+            student: recognizedStudent,
+            confidence,
+            action,
+            auditId: audit_id,
+            requiresManualConfirmation: true,
+          })
+          setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
+            confidence, message: classMismatchMessage })
+          setMessage(classMismatchMessage)
+          return
+        }
 
         if (recognizedCode && official_attendance_allowed === false && blockMessage) {
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
@@ -296,26 +332,24 @@ export default function Attendance() {
     }, 'image/jpeg', 0.95)
   }
 
-  const submitManualAttendance = async () => {
-    if (!sessionId || !manualStudentCode) {
-      setMessage('Hãy chọn buổi học và sinh viên.')
-      return
-    }
-    if (!officialStudents.some((student) => student.student_code === manualStudentCode)) {
-      setMessage(OFFICIAL_BLOCK_MESSAGE)
-      return
-    }
+  const deleteAttendanceRecord = async (record) => {
+    if (!record?.record_id) return
+
+    const studentLabel = `${record.student_code || '-'} - ${record.full_name || '-'}`
+    const confirmed = window.confirm(
+      `Bạn có chắc muốn xóa bản ghi điểm danh của sinh viên ${studentLabel} khỏi buổi học này không?`,
+    )
+    if (!confirmed) return
+
+    setDeletingRecordId(record.record_id)
     try {
-      await api.post('/attendance/manual', {
-        student_code: manualStudentCode,
-        session_id:   Number(sessionId),
-        note:         manualNote || null,
-      })
-      setMessage(`Đã ghi nhận thủ công cho ${manualStudentCode}.`)
-      setManualNote('')
+      await api.delete(`/attendance/${record.record_id}`)
+      setMessage(`Đã xóa bản ghi điểm danh của ${studentLabel}.`)
       await loadSessionAttendance(sessionId)
     } catch (err) {
-      setMessage(getApiErrorMessage(err, 'Không ghi nhận được điểm danh thủ công.'))
+      setMessage(getApiErrorMessage(err, 'Không xóa được bản ghi điểm danh.'))
+    } finally {
+      setDeletingRecordId(null)
     }
   }
 
@@ -361,7 +395,7 @@ export default function Attendance() {
           <p className="eyebrow">Điểm danh</p>
           <h1 className="page-title">Điểm danh và theo dõi buổi học</h1>
           <p className="page-subtitle">
-            Chọn buổi học và nhận diện khuôn mặt để ghi vào lớp/ra về{isAdmin ? ', hoặc điểm danh thủ công.' : '.'}
+            Chọn buổi học và nhận diện khuôn mặt để ghi vào lớp/ra về. Trường hợp khác lớp sẽ được xác nhận ngay sau khi quét mặt.
           </p>
         </div>
       </div>
@@ -471,12 +505,12 @@ export default function Attendance() {
 
       {message && <p className="status-message">{message}</p>}
 
-      <div className="grid two">
+      <div style={{ maxWidth: 920 }}>
         {/* Camera + nhận diện */}
         <div className="panel panel-pad">
           <video
             ref={videoRef} autoPlay playsInline
-            style={{ width: '100%', maxWidth: 560, background: '#000', borderRadius: 8 }}
+            style={{ width: '100%', maxWidth: 760, background: '#000', borderRadius: 8, display: 'block' }}
           />
           <canvas ref={canvasRef} style={{ display: 'none' }} />
 
@@ -509,7 +543,7 @@ export default function Attendance() {
               {pendingRecognition && (
                 <div className="toolbar" style={{ marginTop: 12 }}>
                   <button onClick={confirmPendingRecognition} disabled={loading}>
-                    Xác nhận {actionLabels[pendingRecognition.action]}
+                    {pendingRecognition.requiresManualConfirmation ? 'Xác nhận thủ công' : `Xác nhận ${actionLabels[pendingRecognition.action]}`}
                   </button>
                   <button className="secondary" onClick={rejectPendingRecognition} disabled={loading}>
                     Hủy kết quả
@@ -519,43 +553,6 @@ export default function Attendance() {
             </div>
           )}
         </div>
-
-        {isAdmin && (
-        <div className="panel panel-pad" style={{ boxShadow: 'none' }}>
-          <h3 style={{ marginTop: 0 }}>Điểm danh thủ công</h3>
-
-          {officialStudents.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
-              Chưa có sinh viên. Vui lòng thêm sinh viên tại mục <strong>Sinh viên</strong> trước.
-            </p>
-          ) : (
-            <select
-              value={manualStudentCode}
-              onChange={(e) => setManualStudentCode(e.target.value)}
-              style={{ width: '100%', marginBottom: 10 }}
-            >
-              {officialStudents.map((s) => (
-                <option key={s.id} value={s.student_code}>
-                  {s.student_code} — {s.full_name}
-                </option>
-              ))}
-            </select>
-          )}
-
-          <textarea
-            rows={4} placeholder="Ghi chú / lý do" value={manualNote}
-            onChange={(e) => setManualNote(e.target.value)}
-            style={{ width: '100%', resize: 'vertical', marginBottom: 10 }}
-          />
-          <button
-            onClick={submitManualAttendance}
-            disabled={!sessionId || !manualStudentCode}
-            style={{ width: '100%' }}
-          >
-            Ghi nhận thủ công
-          </button>
-        </div>
-        )}
       </div>
 
       {/* Bảng điểm danh buổi học */}
@@ -567,10 +564,10 @@ export default function Attendance() {
           <div className="empty-state">Chưa có dữ liệu điểm danh cho buổi học này.</div>
         ) : (
           <div className="table-wrap">
-            <table className="data-table">
+            <table className="data-table" style={{ minWidth: 820 }}>
               <thead>
                 <tr>
-                  {['Mã SV', 'Họ tên', 'Trạng thái', 'Vào lớp', 'Ra về', 'Tin cậy vào', 'Tin cậy ra'].map((h) => (
+                  {['Mã SV', 'Họ tên', 'Trạng thái', 'Vào lớp', 'Ra về', 'Tin cậy vào', 'Tin cậy ra', 'Xóa'].map((h) => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
@@ -589,6 +586,25 @@ export default function Attendance() {
                     <td>{formatDT(record.check_out_at)}</td>
                     <td>{formatConf(record.check_in_conf)}</td>
                     <td>{formatConf(record.check_out_conf)}</td>
+                    <td>
+                      {record.record_id && canDeleteAttendance ? (
+                        <button
+                          className="secondary"
+                          onClick={() => deleteAttendanceRecord(record)}
+                          disabled={deletingRecordId === record.record_id}
+                          style={{
+                            minHeight: 30,
+                            padding: '5px 10px',
+                            borderColor: 'rgba(244,63,94,.35)',
+                            color: '#fb7185',
+                          }}
+                        >
+                          {deletingRecordId === record.record_id ? 'Đang xóa...' : 'Xóa'}
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>-</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

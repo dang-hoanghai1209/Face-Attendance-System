@@ -97,13 +97,11 @@ def build_session_report(session_id: int, db: Session):
         .order_by(Student.full_name.asc())
         .all()
     )
-    official_student_ids = [student.id for student in students]
     attendance_records = (
         db.query(Attendance)
-        .filter(Attendance.session_id == session_id, Attendance.student_id.in_(official_student_ids))
+        .join(Student, Attendance.student_id == Student.id)
+        .filter(Attendance.session_id == session_id, *official_student_filter())
         .all()
-        if official_student_ids
-        else []
     )
     attendance_map = best_records_by(attendance_records, "student_id")
 
@@ -112,6 +110,7 @@ def build_session_report(session_id: int, db: Session):
         record = attendance_map.get(student.id)
         report_rows.append(
             {
+                "record_id": record.id if record else None,
                 "student_code": student.student_code,
                 "full_name": student.full_name,
                 "class_name": student.class_name,
@@ -127,6 +126,42 @@ def build_session_report(session_id: int, db: Session):
                 "note": record.note if record else None,
             }
         )
+
+    class_student_ids = {student.id for student in students}
+    cross_class_student_ids = [
+        student_id
+        for student_id in attendance_map
+        if student_id not in class_student_ids
+    ]
+    if cross_class_student_ids:
+        cross_class_students = (
+            db.query(Student)
+            .filter(Student.id.in_(cross_class_student_ids), *official_student_filter())
+            .order_by(Student.full_name.asc())
+            .all()
+        )
+        for student in cross_class_students:
+            record = attendance_map.get(student.id)
+            if not record:
+                continue
+            report_rows.append(
+                {
+                    "record_id": record.id,
+                    "student_code": student.student_code,
+                    "full_name": student.full_name,
+                    "class_name": student.class_name,
+                    "subject": session.subject,
+                    "session_date": session.session_date.isoformat() if session.session_date else None,
+                    "start_time": session.start_time.isoformat() if session.start_time else None,
+                    "end_time": session.end_time.isoformat() if session.end_time else None,
+                    "status": record.status,
+                    "check_in_at": record.check_in_at.isoformat() if record.check_in_at else None,
+                    "check_out_at": record.check_out_at.isoformat() if record.check_out_at else None,
+                    "check_in_conf": record.check_in_conf,
+                    "check_out_conf": record.check_out_conf,
+                    "note": record.note,
+                }
+            )
 
     return session, report_rows
 

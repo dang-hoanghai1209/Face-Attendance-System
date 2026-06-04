@@ -2,6 +2,8 @@ import { NavLink } from 'react-router-dom'
 
 import { useAuth } from '../auth/auth-context.js'
 
+const NTU_LOGO_SRC = '/logo-dai-hoc-nha-trang.jpg'
+
 const NAV = [
   {
     label: 'Chính',
@@ -33,10 +35,10 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="logo-mark">NTU</div>
+        <img className="brand-logo" src={NTU_LOGO_SRC} alt="Logo Đại học Nha Trang" />
         <div className="logo-text">
-          <strong>Điểm danh NTU</strong>
-          <span>Face Attendance v1.0</span>
+          <strong>Hệ thống điểm danh</strong>
+          <span>Project chuyên đề</span>
         </div>
       </div>
 

@@ -52,7 +52,7 @@ def _ensure_code_matches_class(student_code: Optional[str], class_name: Optional
     if not student_code_matches_class(student_code, class_name):
         raise HTTPException(
             status_code=400,
-            detail=f"Student code {student_code} does not match class {class_name}.",
+            detail=f"Mã sinh viên {student_code} không có khớp với lớp {class_name}.",
         )
 
 
@@ -60,7 +60,7 @@ def _validate_data_source(v: Optional[str]) -> str:
     value = (v or "real").strip().lower()
     if value not in VALID_DATA_SOURCES:
         raise ValueError(
-            f"Data source must be one of: {', '.join(sorted(VALID_DATA_SOURCES))}."
+            f"Nguồn dữ liệu phải là một trong những dữ liệu sau: {', '.join(sorted(VALID_DATA_SOURCES))}."
         )
     return value
 
@@ -71,7 +71,7 @@ def _validate_registration_method(v: Optional[str]) -> Optional[str]:
     value = v.strip().lower()
     if value not in VALID_REGISTRATION_METHODS:
         raise ValueError(
-            f"Registration method must be one of: {', '.join(sorted(VALID_REGISTRATION_METHODS))}."
+            f"Nguồn dữ liệu phải là một trong các giá trị sau: {', '.join(sorted(VALID_REGISTRATION_METHODS))}."
         )
     return value
 
@@ -152,7 +152,7 @@ def create_student(student: StudentBase, _current_user=Depends(require_admin), d
 
     existing = db.query(Student).filter(Student.student_code == student.student_code).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Student code already exists.")
+        raise HTTPException(status_code=400, detail="Mã sinh viên đã tồn tại.")
 
     db_student = Student(**student.model_dump())
     db.add(db_student)
@@ -170,7 +170,7 @@ def update_student(
 ):
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found.")
+        raise HTTPException(status_code=404, detail="Sinh viên không hợp lệ.")
 
     updates = student_data.model_dump(exclude_unset=True)
     next_student_code = updates.get("student_code", student.student_code)
@@ -184,7 +184,7 @@ def update_student(
             .first()
         )
         if duplicate:
-            raise HTTPException(status_code=400, detail="Student code already exists.")
+            raise HTTPException(status_code=400, detail="Mã sinh viên đã tồn tại.")
 
     for field, value in updates.items():
         setattr(student, field, value)
@@ -198,11 +198,11 @@ def update_student(
 def delete_student(student_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found.")
+        raise HTTPException(status_code=404, detail="Sinh viên không hợp lệ.")
 
     db.query(Attendance).filter(Attendance.student_id == student_id).delete()
     db.query(FaceEmbedding).filter(FaceEmbedding.student_id == student_id).delete()
     db.query(RecognitionAttempt).filter(RecognitionAttempt.predicted_student_id == student_id).delete()
     db.delete(student)
     db.commit()
-    return {"message": f"Deleted student {student.full_name}."}
+    return {"message": f"Đã xóa sinh viên {student.full_name}."}

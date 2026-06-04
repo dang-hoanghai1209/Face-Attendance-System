@@ -19,7 +19,7 @@ router = APIRouter(prefix="/faces", tags=["Faces"])
 
 
 def _upload_name(upload: UploadFile):
-    return upload.filename or "unnamed_upload"
+    return upload.filename or "tep_tai_len_khong_ten"
 
 
 @router.post("/register")
@@ -31,16 +31,16 @@ def register_face_samples(
 ):
     student = db.query(Student).filter(Student.student_code == student_code).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy sinh viên.")
 
     if student.data_source != "real" or student.is_demo:
         raise HTTPException(
             status_code=400,
-            detail="Only real students can register faces by camera.",
+            detail="Chỉ sinh viên thật mới được đăng ký khuôn mặt bằng camera.",
         )
 
     if len(files) < 5:
-        raise HTTPException(status_code=400, detail="At least 5 face samples are required.")
+        raise HTTPException(status_code=400, detail="Cần ít nhất 5 ảnh mẫu khuôn mặt.")
 
     embeddings = []
     rejected_files = []
@@ -51,18 +51,18 @@ def register_face_samples(
             image_bytes = upload.file.read()
             face_count = count_faces_in_image_bytes(image_bytes)
             if face_count == 0:
-                rejected_files.append({"filename": upload_name, "reason": "no_face_detected"})
+                rejected_files.append({"filename": upload_name, "reason": "Không phát hiện khuôn mặt."})
                 continue
             if face_count > 1:
-                rejected_files.append({"filename": upload_name, "reason": f"multiple_faces_detected: {face_count}"})
+                rejected_files.append({"filename": upload_name, "reason": f"Phát hiện nhiều khuôn mặt: {face_count}."})
                 continue
             embedding = image_bytes_to_embedding(image_bytes)
         except Exception as exc:
-            rejected_files.append({"filename": upload_name, "reason": f"invalid_image: {exc}"})
+            rejected_files.append({"filename": upload_name, "reason": f"Ảnh không hợp lệ: {exc}"})
             continue
 
         if embedding is None:
-            rejected_files.append({"filename": upload_name, "reason": "no_face_detected"})
+            rejected_files.append({"filename": upload_name, "reason": "Không phát hiện khuôn mặt."})
             continue
 
         embeddings.append(embedding)
@@ -72,8 +72,8 @@ def register_face_samples(
             status_code=400,
             detail={
                 "message": (
-                    "Not enough valid face samples were detected. "
-                    "Make sure the face is centered, bright, and clearly visible."
+                    "Không phát hiện đủ ảnh mẫu khuôn mặt hợp lệ. "
+                    "Vui lòng đảm bảo khuôn mặt ở giữa khung hình, đủ sáng và nhìn rõ."
                 ),
                 "accepted_samples": len(embeddings),
                 "rejected_samples": len(rejected_files),
@@ -94,7 +94,7 @@ def register_face_samples(
         "rejected_samples": len(rejected_files),
         "rejected_files": rejected_files,
         "total_registered_embeddings": embedding_count(db, student.id),
-        "message": "Face samples registered successfully.",
+        "message": "Đăng ký mẫu khuôn mặt thành công.",
     }
 
 
@@ -102,7 +102,7 @@ def register_face_samples(
 def get_student_face_status(student_code: str, _current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.student_code == student_code).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found.")
+        raise HTTPException(status_code=404, detail="Sinh viên không hợp lệ.")
 
     registered_embeddings = embedding_count(db, student.id)
 

@@ -3,6 +3,8 @@ import { Navigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/auth-context.js'
 
+const NTU_LOGO_SRC = '/logo-dai-hoc-nha-trang.jpg'
+
 export default function Login() {
   const { isAuthenticated, login } = useAuth()
   const [username, setUsername] = useState('')
@@ -39,10 +41,17 @@ export default function Login() {
           color:'#111827'
         }}
       >
-        <div style={{ marginBottom:18 }}>
-          <p style={{ margin:0, color:'#0f766e', fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'.08em' }}>Face Attendance</p>
-          <h1 style={{ margin:'6px 0 4px', fontSize:24, lineHeight:1.2 }}>Đăng nhập hệ thống</h1>
-          <p style={{ margin:0, color:'#6b7280', fontSize:13 }}>Cần tài khoản để xem hoặc sửa dữ liệu điểm danh.</p>
+        <div style={{ marginBottom:18, display:'flex', alignItems:'center', gap:14 }}>
+          <img
+            src={NTU_LOGO_SRC}
+            alt="Logo Đại học Nha Trang"
+            style={{ width:58, height:58, objectFit:'contain', flexShrink:0 }}
+          />
+          <div>
+            <p style={{ margin:0, color:'#0f766e', fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'.08em' }}>Face Attendance</p>
+            <h1 style={{ margin:'6px 0 4px', fontSize:24, lineHeight:1.2 }}>Đăng nhập hệ thống</h1>
+            <p style={{ margin:0, color:'#6b7280', fontSize:13 }}>Cần tài khoản để xem hoặc sửa dữ liệu điểm danh.</p>
+          </div>
         </div>
 
         <label style={{ display:'block', fontSize:12, fontWeight:700, marginBottom:6 }}>Tên đăng nhập</label>

@@ -12,8 +12,10 @@ from starlette.datastructures import UploadFile
 
 import main
 from database import Base, SessionLocal, engine
+from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
+from services import attendance_service, report_service
 
 
 class RecognitionEndpointTests(unittest.TestCase):
@@ -112,8 +114,46 @@ class RecognitionEndpointTests(unittest.TestCase):
         result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
 
         self.assertFalse(result["official_attendance_allowed"])
-        self.assertEqual(result["reason"], "cross_class_requires_manual_confirmation")
+        self.assertTrue(result["recognized"])
+        self.assertTrue(result["requires_manual_confirmation"])
+        self.assertEqual(result["reason"], "class_mismatch")
+        self.assertEqual(result["session_id"], session.id)
+        self.assertIsNotNone(result["audit_id"])
+        audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
+        self.assertEqual(audit.status, "class_mismatch")
         self.assertIn("Sinh viên thuộc lớp 63LFW, khác lớp chính của buổi học 64CNTT", result["message"])
+
+    def test_cross_class_recognize_audit_can_be_manually_confirmed_and_reported(self):
+        session = ClassSession(
+            subject="Software Testing",
+            class_name="64CNTT",
+            session_date=date(2026, 6, 1),
+            start_time=time(7, 0),
+            end_time=time(9, 0),
+        )
+        self.db.add(session)
+        self.db.commit()
+        self.db.refresh(session)
+        self.add_student(student_code="63123456", class_name="63LFW")
+        main.count_faces_in_image_bytes = lambda _image: 1
+        main.image_bytes_to_embedding = lambda _image: torch.zeros(512)
+        main.fetch_db_embeddings = lambda _db: [object()]
+        main.match_embedding = lambda *_args, **_kwargs: ("success", "63123456", 0.91)
+
+        recognition = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+        response = attendance_service.record_manual_attendance(
+            self.db,
+            "63123456",
+            session.id,
+            audit_id=recognition["audit_id"],
+        )
+        _session, rows = report_service.build_session_report(session.id, self.db)
+        by_code = {row["student_code"]: row for row in rows}
+
+        self.assertEqual(recognition["reason"], "class_mismatch")
+        self.assertIsNotNone(recognition["audit_id"])
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(by_code["63123456"]["status"], "manual")
 
 
 if __name__ == "__main__":

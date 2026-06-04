@@ -30,11 +30,11 @@ def _validate_class(v: Optional[str]) -> Optional[str]:
 
 def _validate_time_range(start_time: Optional[time], end_time: Optional[time]) -> None:
     if start_time is None:
-        raise ValueError("Start time is required.")
+        raise ValueError("Vui lòng nhập thời gian bắt đầu.")
     if end_time is None:
-        raise ValueError("End time is required.")
+        raise ValueError("Vui lòng nhập thời gian kết thúc.")
     if end_time <= start_time:
-        raise ValueError("End time must be later than start time.")
+        raise ValueError("Thời gian kết thúc phải sau thời gian bắt đầu.")
 
 
 class SessionCreate(BaseModel):
@@ -93,7 +93,7 @@ def update_session(
 ):
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+        raise HTTPException(status_code=404, detail="Buổi học không hợp lệ.")
 
     updates = session_data.model_dump(exclude_unset=True)
     next_start_time = updates.get("start_time", session.start_time)
@@ -115,10 +115,10 @@ def update_session(
 def delete_session(session_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+        raise HTTPException(status_code=404, detail="Buổi học không hợp lệ.")
 
     db.query(Attendance).filter(Attendance.session_id == session_id).delete()
     db.query(RecognitionAttempt).filter(RecognitionAttempt.session_id == session_id).delete()
     db.delete(session)
     db.commit()
-    return {"message": f"Deleted session {session_id}."}
+    return {"message": f"Đã xóa buổi học {session_id}."}

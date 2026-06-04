@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.attendance import Attendance
+from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
 from services.timezone_service import now_in_app_timezone
@@ -17,7 +18,14 @@ OFFICIAL_ATTENDANCE_BLOCK_MESSAGE = (
 )
 
 
-CROSS_CLASS_REASON_CODE = "cross_class_requires_manual_confirmation"
+CROSS_CLASS_LEGACY_CODE = "cross_class_requires_manual_confirmation"
+CROSS_CLASS_REASON_CODE = "class_mismatch"
+MANUAL_CONFIRMABLE_AUDIT_STATUSES = {
+    CROSS_CLASS_REASON_CODE,
+    CROSS_CLASS_LEGACY_CODE,
+    "success",
+    "uncertain",
+}
 
 
 def cross_class_attendance_message(student_class: str, session_class: str):
@@ -43,26 +51,32 @@ def official_attendance_block_reason(student: Student):
     return None
 
 
-def get_student_and_session(db: Session, student_code: str, session_id: int):
+def _get_student_and_session_base(db: Session, student_code: str, session_id: int):
     student = db.query(Student).filter(Student.student_code == student_code).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Student not found.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy sinh viên.")
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy buổi học.")
 
     if not student.class_name:
-        raise HTTPException(status_code=400, detail="Student does not have a class assigned.")
+        raise HTTPException(status_code=400, detail="Sinh viên chưa được gán lớp.")
     if not session.class_name:
-        raise HTTPException(status_code=400, detail="Session does not have a class assigned.")
+        raise HTTPException(status_code=400, detail="Buổi học chưa được gán lớp.")
+
+    return student, session
+
+
+def get_student_and_session(db: Session, student_code: str, session_id: int):
+    student, session = _get_student_and_session_base(db, student_code, session_id)
     if student.class_name != session.class_name:
         # TODO: Sau này nên kiểm tra bằng danh sách đăng ký môn học/session_students thay vì so sánh class_name.
         raise HTTPException(
             status_code=400,
             detail={
                 "reason": "class_mismatch",
-                "code": CROSS_CLASS_REASON_CODE,
+                "code": CROSS_CLASS_LEGACY_CODE,
                 "message": cross_class_attendance_message(student.class_name, session.class_name),
                 "student_class": student.class_name,
                 "session_class": session.class_name,
@@ -75,6 +89,69 @@ def get_student_and_session(db: Session, student_code: str, session_id: int):
 
     return student, session
 
+
+def validate_cross_class_manual_audit(db: Session, student: Student, session: ClassSession, audit_id: int | None):
+    if not audit_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "missing_recognition_audit",
+                "message": "Thiếu audit_id để xác nhận thủ công cho trường hợp sinh viên khác lớp.",
+            },
+        )
+
+    attempt = db.query(RecognitionAttempt).filter(RecognitionAttempt.id == audit_id).first()
+    if not attempt:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "reason": "recognition_audit_not_found",
+                "message": "Không tìm thấy bản ghi kiểm tra nhận diện.",
+            },
+        )
+
+    if attempt.session_id != session.id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "audit_session_mismatch",
+                "message": "Bản ghi nhận diện không thuộc buổi học hiện tại.",
+            },
+        )
+
+    audit_student_matches = (
+        attempt.predicted_student_id == student.id
+        or attempt.predicted_student_code == student.student_code
+    )
+    if not audit_student_matches:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "audit_student_mismatch",
+                "message": "Bản ghi nhận diện không khớp với sinh viên cần xác nhận.",
+            },
+        )
+
+    if attempt.status not in MANUAL_CONFIRMABLE_AUDIT_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "invalid_recognition_audit",
+                "message": "Trạng thái bản ghi nhận diện không hợp lệ để xác nhận thủ công sinh viên khác lớp.",
+                "audit_status": attempt.status,
+            },
+        )
+
+    if attempt.confidence is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason": "missing_audit_confidence",
+                "message": "Bản ghi nhận diện thiếu điểm tin cậy.",
+            },
+        )
+
+    return attempt
 
 def calculate_attendance_status(session: ClassSession, check_in_at: datetime):
     if not session.start_time:
@@ -111,7 +188,7 @@ def get_session_record(db: Session, student_id: int, session_id: int):
 def already_checked_in_response(record: Attendance, student: Student):
     return {
         "status": "success",
-        "message": f"{student.full_name} already checked in for this session.",
+        "message": f"{student.full_name} đã được ghi nhận vào lớp cho buổi học này.",
         "data": serialize_record(record, student),
     }
 
@@ -142,12 +219,12 @@ def record_checkin(db: Session, student_code: str, session_id: int, confidence=N
         existing = get_session_record(db, student.id, session_id)
         if existing:
             return already_checked_in_response(existing, student)
-        raise HTTPException(status_code=409, detail="Attendance record already exists.") from exc
+        raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
     db.refresh(record)
 
     return {
         "status": "success",
-        "message": f"Check-in recorded for {student.full_name}.",
+        "message": f"Đã ghi nhận vào lớp cho {student.full_name}.",
         "data": serialize_record(record, student),
     }
 
@@ -156,12 +233,12 @@ def record_checkout(db: Session, student_code: str, session_id: int, confidence=
     student, _session = get_student_and_session(db, student_code, session_id)
     existing = get_session_record(db, student.id, session_id)
     if not existing:
-        raise HTTPException(status_code=404, detail="No check-in record found for this session.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy bản ghi vào lớp cho buổi học này.")
 
     if existing.check_out_at:
         return {
             "status": "success",
-            "message": f"{student.full_name} already checked out for this session.",
+            "message": f"{student.full_name} đã được ghi nhận ra về cho buổi học này.",
             "data": serialize_record(existing, student),
         }
 
@@ -172,34 +249,47 @@ def record_checkout(db: Session, student_code: str, session_id: int, confidence=
 
     return {
         "status": "success",
-        "message": f"Check-out recorded for {student.full_name}.",
+        "message": f"Đã ghi nhận ra về cho {student.full_name}.",
         "data": serialize_record(existing, student),
     }
 
 
-def _update_manual_record(db: Session, record: Attendance, student: Student, note=None):
+def _update_manual_record(db: Session, record: Attendance, student: Student, note=None, confidence=None):
     record.status = "manual"
     record.note = note
+    if confidence is not None and record.check_in_conf is None:
+        record.check_in_conf = confidence
     db.commit()
     db.refresh(record)
     return {
         "status": "success",
-        "message": f"Manual attendance updated for {student.full_name}.",
+        "message": f"Đã cập nhật điểm danh thủ công cho {student.full_name}.",
         "data": serialize_record(record, student),
     }
 
 
-def record_manual_attendance(db: Session, student_code: str, session_id: int, note=None):
-    student, _session = get_student_and_session(db, student_code, session_id)
+def record_manual_attendance(db: Session, student_code: str, session_id: int, note=None, audit_id: int | None = None):
+    student, session = _get_student_and_session_base(db, student_code, session_id)
+
+    block_reason = official_attendance_block_reason(student)
+    if block_reason:
+        raise HTTPException(status_code=403, detail=block_reason)
+
+    recognition_confidence = None
+    if student.class_name != session.class_name:
+        attempt = validate_cross_class_manual_audit(db, student, session, audit_id)
+        recognition_confidence = attempt.confidence
+
     existing = get_session_record(db, student.id, session_id)
 
     if existing:
-        return _update_manual_record(db, existing, student, note)
+        return _update_manual_record(db, existing, student, note, recognition_confidence)
 
     record = Attendance(
         student_id=student.id,
         session_id=session_id,
         check_in_at=now_in_app_timezone(),
+        check_in_conf=recognition_confidence,
         status="manual",
         note=note,
     )
@@ -210,14 +300,42 @@ def record_manual_attendance(db: Session, student_code: str, session_id: int, no
         db.rollback()
         existing = get_session_record(db, student.id, session_id)
         if existing:
-            return _update_manual_record(db, existing, student, note)
-        raise HTTPException(status_code=409, detail="Attendance record already exists.") from exc
+            return _update_manual_record(db, existing, student, note, recognition_confidence)
+        raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
     db.refresh(record)
 
     return {
         "status": "success",
-        "message": f"Manual attendance recorded for {student.full_name}.",
+        "message": f"Đã ghi nhận điểm danh thủ công cho {student.full_name}.",
         "data": serialize_record(record, student),
+    }
+
+
+def delete_attendance_record(db: Session, attendance_id: int):
+    record = db.query(Attendance).filter(Attendance.id == attendance_id).first()
+    if not record:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "reason": "attendance_record_not_found",
+                "message": f"Không tìm thấy bản ghi điểm danh #{attendance_id}.",
+            },
+        )
+
+    student = db.query(Student).filter(Student.id == record.student_id).first()
+    deleted = {
+        "record_id": record.id,
+        "student_code": student.student_code if student else None,
+        "full_name": student.full_name if student else None,
+        "session_id": record.session_id,
+    }
+    db.delete(record)
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "Đã xóa bản ghi điểm danh.",
+        "data": deleted,
     }
 
 

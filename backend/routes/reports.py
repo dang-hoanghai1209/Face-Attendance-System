@@ -341,7 +341,7 @@ def get_session_report(session_id: int, _current_user=Depends(get_current_user),
 def export_excel(class_name: str, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     summary = report_service.build_class_summary(class_name, db)
     if not summary:
-        raise HTTPException(status_code=404, detail="No data found for this class.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu trong lớp này.")
 
     warnings = [item for item in summary if item["warning"]]
     stream = io.BytesIO()
@@ -364,7 +364,7 @@ def export_excel(class_name: str, _current_user=Depends(require_admin), db: Sess
 def export_pdf(class_name: str, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     summary = report_service.build_class_summary(class_name, db)
     if not summary:
-        raise HTTPException(status_code=404, detail="No data found for this class.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu trong lớp này.")
 
     stream = io.BytesIO()
     c, y = _new_pdf(stream)

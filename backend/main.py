@@ -383,12 +383,13 @@ def _recognize_uploaded_face(
             message = official_warning
         audit_id = None
         if audit_recognition:
+            audit_status = CROSS_CLASS_REASON_CODE if official_warning_code == CROSS_CLASS_REASON_CODE else recognition_status
             attempt = _audit_recognition_safely(
                 db,
                 session_id=session_id,
                 predicted_student_code=student_code,
                 confidence=similarity,
-                status=recognition_status,
+                status=audit_status,
                 image_path=capture_path,
                 message=message,
             )
@@ -412,7 +413,10 @@ def _recognize_uploaded_face(
         "official_attendance_allowed": official_warning is None and recognition_status in {"success", "uncertain"},
         "official_attendance_warning": official_warning,
         "official_attendance_warning_code": official_warning_code,
+        "recognized": student_data is not None and recognition_status in {"success", "uncertain"},
+        "requires_manual_confirmation": official_warning_code == CROSS_CLASS_REASON_CODE,
         "reason": official_warning_code,
+        "session_id": session_id,
         "processing_time_ms": processing_time_ms,
         "processing_ms": processing_time_ms,
         "audit_id": audit_id,

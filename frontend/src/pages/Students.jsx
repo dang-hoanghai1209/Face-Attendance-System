@@ -197,7 +197,7 @@ export default function Students() {
           </Field>
           <Field label="Họ tên" error={errors.full_name}>
             <input
-              placeholder="Nguyễn Văn A"
+              placeholder="Họ Tên"
               value={form.full_name}
               onChange={(e) => handleChange('full_name', e.target.value)}
               style={errors.full_name ? { borderColor:'var(--red)' } : {}}

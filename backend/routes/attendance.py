@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services import attendance_service
-from services.auth_service import get_current_user, require_admin
+from services.auth_service import get_current_user, require_admin, require_role
 
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 logger = logging.getLogger("face_attendance")
+require_attendance_editor = require_role("admin", "teacher")
 
 
 class AttendanceCheckIn(BaseModel):
@@ -31,6 +32,7 @@ class ManualAttendanceCreate(BaseModel):
     student_code: str
     session_id: int
     note: Optional[str] = None
+    audit_id: Optional[int] = None
 
 
 @router.post("/")
@@ -90,9 +92,11 @@ def record_manual_attendance(
     db: Session = Depends(get_db),
 ):
     logger.info(
-        "attendance manual request: session_id=%s student_code=%s user=%s",
+        "attendance manual request: session_id=%s student_code=%s audit_id=%s note_present=%s user=%s",
         data.session_id,
         data.student_code,
+        data.audit_id,
+        data.note is not None,
         current_user.username,
     )
     return attendance_service.record_manual_attendance(
@@ -100,7 +104,23 @@ def record_manual_attendance(
         student_code=data.student_code,
         session_id=data.session_id,
         note=data.note,
+        audit_id=data.audit_id,
     )
+
+
+@router.delete("/{attendance_id}")
+def delete_attendance_record(
+    attendance_id: int,
+    current_user=Depends(require_attendance_editor),
+    db: Session = Depends(get_db),
+):
+    logger.info(
+        "attendance delete request: attendance_id=%s user=%s role=%s",
+        attendance_id,
+        current_user.username,
+        current_user.role,
+    )
+    return attendance_service.delete_attendance_record(db, attendance_id)
 
 
 @router.get("/session/{session_id}")

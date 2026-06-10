@@ -44,6 +44,17 @@
   --mono:     'JetBrains Mono', monospace;
   --shadow:   0 24px 48px rgba(0,0,0,.4);
 
+  /* Variables for previously hardcoded colors to support theming */
+  --sidebar-bg:     rgba(10,20,32,.97);
+  --topbar-bg:      rgba(10,20,32,.7);
+  --bottom-nav-bg:  rgba(10,20,32,0.95);
+  --input-bg:       rgba(255,255,255,.04);
+  --input-focus-bg: rgba(255,255,255,.07);
+  --th-bg:          rgba(255,255,255,.02);
+  --td-border:      rgba(255,255,255,.04);
+  --bg-gradient:    radial-gradient(ellipse, rgba(0,201,167,.09) 0%, transparent 65%);
+  --noise-opacity:  .022;
+
   /* Legacy aliases — giữ để các page cũ không lỗi */
   --primary:       var(--teal);
   --primary-dark:  var(--teal2);
@@ -58,6 +69,45 @@
   --danger:        var(--red);
   --bg:            var(--navy);
   --radius:        var(--r-sm);
+}
+
+/* ── Light Theme ── */
+body[data-theme="light"] {
+  /* Nền */
+  --navy:     #f8fafc; /* slate-50 */
+  --navy2:    #ffffff; /* trắng tinh cho card/sidebar */
+  --navy3:    #f1f5f9; /* slate-100 cho panel trong */
+  --navy4:    #e2e8f0; /* slate-200 cho hover/select */
+
+  /* Accent - làm đậm hơn một chút để dễ đọc trên nền sáng */
+  --teal:     #0d9488; /* teal-600 */
+  --teal2:    #0f766e; /* teal-700 */
+  --teal-g:   rgba(13,148,136,.12);
+
+  /* Text - đảo ngược sang màu tối */
+  --white:    #0f172a; /* slate-900 */
+  --white2:   #334155; /* slate-700 */
+  --muted:    #64748b; /* slate-500 */
+
+  /* Border */
+  --bdr:      rgba(0,0,0,.06);
+  --bdr2:     rgba(0,0,0,.1);
+
+  /* Card */
+  --card:     #ffffff;
+  --card2:    #f1f5f9;
+
+  /* Theme-specific overrides */
+  --sidebar-bg:     rgba(255,255,255,.96);
+  --topbar-bg:      rgba(255,255,255,.85);
+  --bottom-nav-bg:  rgba(255,255,255,0.96);
+  --input-bg:       #ffffff;
+  --input-focus-bg: #f8fafc;
+  --th-bg:          #f1f5f9;
+  --td-border:      #e2e8f0;
+  --bg-gradient:    radial-gradient(ellipse, rgba(13,148,136,.06) 0%, transparent 65%);
+  --noise-opacity:  .012;
+  --shadow:         0 10px 30px rgba(0,0,0,.04), 0 1px 3px rgba(0,0,0,.02);
 }
 
 /* ── Reset ── */
@@ -85,7 +135,7 @@ body::before {
   position: fixed; top: -300px; left: 50%;
   transform: translateX(-50%);
   width: 900px; height: 600px;
-  background: radial-gradient(ellipse, rgba(0,201,167,.09) 0%, transparent 65%);
+  background: var(--bg-gradient);
   pointer-events: none; z-index: 0;
 }
 

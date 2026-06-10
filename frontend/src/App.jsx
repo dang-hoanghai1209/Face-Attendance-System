@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 
 import './App.css'
 import { AuthProvider } from './auth/AuthContext.jsx'
+import { ThemeProvider } from './context/ThemeContext.jsx'
+import ThemeToggle from './components/ThemeToggle.jsx'
 import { useAuth } from './auth/auth-context.js'
 import Sidebar from './components/Navbar'
 import BottomNavigation from './components/BottomNavigation'
@@ -43,6 +45,7 @@ function Topbar() {
         <div className="topbar-pill">
           {user?.username || 'Người dùng'} · {getDisplayLabel(roleLabels, user?.role, 'Người dùng')}
         </div>
+        <ThemeToggle style={{ marginRight: 4 }} />
         <button className="secondary" onClick={logout} style={{ minHeight:34, padding:'6px 12px' }}>
           Đăng xuất
         </button>
@@ -92,14 +95,16 @@ function ProtectedShell() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/*" element={<ProtectedShell />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/*" element={<ProtectedShell />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   )
 }
 

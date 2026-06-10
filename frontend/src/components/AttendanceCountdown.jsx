@@ -94,7 +94,7 @@ export default function AttendanceCountdown({ sessionDate, startTime, onStatusCh
   }
 
   // Tùy biến kiểu hiển thị dựa trên trạng thái
-  let bg = 'rgba(255,255,255,.03)'
+  let bg = 'var(--card)'
   let border = 'var(--bdr)'
   let color = 'var(--white)'
   let badgeText = 'Chưa bắt đầu'

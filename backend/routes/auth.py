@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.user import User
-from services.auth_service import create_access_token, get_current_user, verify_password
+from services.auth_service import create_access_token, get_current_user, resolve_student_for_user, verify_password
 
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -15,13 +15,16 @@ class LoginRequest(BaseModel):
     password: str
 
 
-def serialize_user(user: User):
+def serialize_user(user: User, db: Session):
+    student = resolve_student_for_user(db, user)
     return {
         "id": user.id,
         "username": user.username,
-        "full_name": user.full_name,
+        "full_name": student.full_name if student else user.full_name,
         "role": user.role,
         "is_active": user.is_active,
+        "student_id": student.id if student else None,
+        "student_code": student.student_code if student else None,
     }
 
 
@@ -37,10 +40,10 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     return {
         "access_token": create_access_token(user),
         "token_type": "bearer",
-        "user": serialize_user(user),
+        "user": serialize_user(user, db),
     }
 
 
 @router.get("/me")
-def get_me(current_user: User = Depends(get_current_user)):
-    return serialize_user(current_user)
+def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return serialize_user(current_user, db)

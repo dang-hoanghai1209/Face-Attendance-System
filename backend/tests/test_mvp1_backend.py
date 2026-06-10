@@ -15,6 +15,9 @@ from models.enrollment import Enrollment
 from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
+from models.user import User
+from routes import attendance as attendance_routes
+from routes.auth import LoginRequest, get_me, login
 from routes.classrooms import ClassroomCreate, create_classroom
 from routes.attendance import AttendanceCheckIn, _checkin_response
 from routes.course_sections import CourseSectionCreate, create_course_section, get_course_section_students
@@ -23,6 +26,7 @@ from routes.sessions import SessionFromSectionCreate, create_session_from_sectio
 from routes.students import _mobile_session_status, get_my_active_sessions
 from routes.subjects import SubjectCreate, create_subject
 from services import attendance_service, report_service
+from services.auth_service import hash_password
 
 
 class BackendMVP1Tests(unittest.TestCase):
@@ -49,6 +53,19 @@ class BackendMVP1Tests(unittest.TestCase):
         self.db.commit()
         self.db.refresh(student)
         return student
+
+    def add_user(self, username="64100001", role="student", full_name="Test User"):
+        user = User(
+            username=username,
+            password_hash=hash_password("password123"),
+            full_name=full_name,
+            role=role,
+            is_active=True,
+        )
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def add_section_bundle(self):
         classroom = create_classroom(
@@ -143,6 +160,7 @@ class BackendMVP1Tests(unittest.TestCase):
     def test_active_sessions_returns_enrolled_section_and_status(self):
         classroom, _subject, section = self.add_section_bundle()
         student = self.add_student()
+        user = self.add_user(username=student.student_code, role="student", full_name=student.full_name)
         section_id = section["id"]
         create_enrollment(
             EnrollmentCreate(course_section_id=section_id, student_id=student.id, status="active"),
@@ -165,7 +183,7 @@ class BackendMVP1Tests(unittest.TestCase):
         original_now = students_module.now_in_app_timezone
         students_module.now_in_app_timezone = lambda: datetime(2026, 6, 10, 7, 5)
         try:
-            items = get_my_active_sessions(student.id, db=self.db)
+            items = get_my_active_sessions(current_user=user, db=self.db)
         finally:
             students_module.now_in_app_timezone = original_now
 
@@ -174,6 +192,103 @@ class BackendMVP1Tests(unittest.TestCase):
         self.assertEqual(items[0]["status"], "open_for_attendance")
         self.assertEqual(items[0]["attendance_deadline"], "07:15")
         self.assertEqual(items[0]["classroom_id"], classroom.id)
+
+    def test_auth_me_returns_student_identity_for_student(self):
+        student = self.add_student(code="64100001", name="Nguyen Van A")
+        user = self.add_user(username=student.student_code, role="student", full_name="Tai khoan SV")
+
+        login_response = login(LoginRequest(username=student.student_code, password="password123"), db=self.db)
+        self.assertEqual(login_response["user"]["student_id"], student.id)
+        self.assertEqual(login_response["user"]["student_code"], student.student_code)
+        self.assertEqual(login_response["user"]["full_name"], student.full_name)
+        self.assertEqual(login_response["user"]["role"], "student")
+
+        me_response = get_me(current_user=user, db=self.db)
+        self.assertEqual(me_response["student_id"], student.id)
+        self.assertEqual(me_response["student_code"], student.student_code)
+        self.assertEqual(me_response["full_name"], student.full_name)
+        self.assertEqual(me_response["role"], "student")
+
+    def test_student_cannot_call_manual_attendance(self):
+        user = self.add_user(username="64100001", role="student", full_name="Nguyen Van A")
+
+        with self.assertRaises(Exception) as ctx:
+            attendance_routes.require_manual_attendance_editor(current_user=user)
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail, "Bạn không có quyền xác nhận điểm danh thủ công.")
+
+    def test_active_sessions_uses_logged_in_student_identity(self):
+        classroom, _subject, section = self.add_section_bundle()
+        student = self.add_student(code="64100001", name="Nguyen Van A")
+        other_student = self.add_student(code="64100002", name="Tran Van B")
+        user = self.add_user(username=student.student_code, role="student", full_name=student.full_name)
+        create_enrollment(
+            EnrollmentCreate(course_section_id=section["id"], student_id=student.id, status="active"),
+            _current_user=None,
+            db=self.db,
+        )
+        create_enrollment(
+            EnrollmentCreate(course_section_id=section["id"], student_id=other_student.id, status="active"),
+            _current_user=None,
+            db=self.db,
+        )
+        session = create_session_from_section(
+            SessionFromSectionCreate(
+                section_id=section["id"],
+                classroom_id=classroom.id,
+                session_date=date(2026, 6, 10),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        items = get_my_active_sessions(current_user=user, student_id=other_student.id, db=self.db)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["session_id"], session.id)
+        self.assertEqual(items[0]["section_id"], section["id"])
+
+    def test_student_only_sees_own_session_report(self):
+        classroom, _subject, section = self.add_section_bundle()
+        student = self.add_student(code="64100001", name="Nguyen Van A")
+        other_student = self.add_student(code="64100002", name="Tran Van B")
+        user = self.add_user(username=student.student_code, role="student", full_name=student.full_name)
+        create_enrollment(
+            EnrollmentCreate(course_section_id=section["id"], student_id=student.id, status="active"),
+            _current_user=None,
+            db=self.db,
+        )
+        create_enrollment(
+            EnrollmentCreate(course_section_id=section["id"], student_id=other_student.id, status="active"),
+            _current_user=None,
+            db=self.db,
+        )
+        session = create_session_from_section(
+            SessionFromSectionCreate(
+                section_id=section["id"],
+                classroom_id=classroom.id,
+                session_date=date(2026, 6, 10),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+        self.db.add_all([
+            Attendance(student_id=student.id, session_id=session.id, status="present"),
+            Attendance(student_id=other_student.id, session_id=session.id, status="present"),
+        ])
+        self.db.commit()
+
+        _session, rows = report_service.build_session_report_for_user(session.id, self.db, user)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["student_code"], student.student_code)
+
+        with self.assertRaises(Exception) as ctx:
+            report_service.build_class_summary_for_user(section["section_code"], self.db, user)
+        self.assertEqual(ctx.exception.status_code, 403)
 
     def test_mobile_session_status_boundaries(self):
         session = ClassSession(

@@ -11,10 +11,12 @@ Checklist này dùng trước khi triển khai Mobile-First + GPS + enrollment v
 - [ ] Enrollment được kiểm tra ở backend trước khi ghi attendance.
 - [x] Time window được kiểm tra ở backend: `start_time` đến `start_time + 15 phút`.
 - [x] Endpoint cũ `/attendance/checkin`, `/attendance/checkout`, `/attendance/manual` vẫn chạy.
+- [x] `POST /attendance/manual` đã bị siết quyền server-side cho `admin`, `teacher`, `lecturer`.
 - [x] Report cũ theo `class_name` vẫn chạy trong giai đoạn chuyển tiếp.
+- [x] Report đã có kiểm tra quyền theo role; student không xem chéo lớp, session report chỉ trả dữ liệu của chính mình.
 - [x] Message backend trả về tiếng Việt có dấu cho luồng MVP mới.
 - [x] Test cho GPS, time window, enrollment, face mismatch và duplicate attendance đã có.
-- [x] `GET /students/me/active-sessions?student_id=...` đã sẵn sàng cho dev mode.
+- [x] `GET /students/me/active-sessions` ưu tiên lấy `student_id` từ JWT user role `student`; query `student_id` chỉ còn là fallback dev mode.
 - [x] CORS cho phép `http://localhost:5173` và `http://127.0.0.1:5173`.
 
 Ngrok chưa được mở tự động. Khi cần test HTTPS, thêm chính xác origin ngrok đang dùng vào cấu hình CORS thay vì dùng wildcard.

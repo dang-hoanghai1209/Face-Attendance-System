@@ -13,7 +13,7 @@ Mục tiêu: mở rộng backend theo hướng quản lý học phần, enrollme
 7. Thêm service kiểm tra thời gian: chỉ cho phép check-in từ `start_time` đến `start_time + 15 phút`.
 8. Thêm service kiểm tra GPS bằng khoảng cách Haversine, bán kính lấy từ `classrooms.radius_meters`.
 9. Thêm endpoint mobile check-in mới, không thay thế ngay endpoint `/attendance/checkin` hiện tại.
-10. Cập nhật report để hỗ trợ cả session cũ theo `class_name` và session mới theo `course_section_id`.
+10. Cập nhật report để hỗ trợ cả session cũ theo `class_name` và session mới theo `course_section_id`, đồng thời siết quyền theo role.
 11. Viết test cho migration, enrollment, GPS, time window và duplicate attendance.
 
 ## File Backend Hiện Tại Cần Nắm
@@ -55,6 +55,8 @@ Mục tiêu: mở rộng backend theo hướng quản lý học phần, enrollme
 - CRUD classroom/subject/course section/enrollment: đã triển khai.
 - Session from section: đã triển khai.
 - Enrollment, GPS, time window và report theo enrollment: đã triển khai.
-- `GET /students/me/active-sessions?student_id=...`: đã triển khai cho dev mode.
+- `GET /students/me/active-sessions`: đã triển khai; production ưu tiên lấy sinh viên từ JWT user role `student`, query `student_id` chỉ là dev fallback.
+- `POST /attendance/manual`: đã siết quyền backend cho `admin`, `teacher`, `lecturer`.
+- `reports` có kiểm tra quyền theo role; student chỉ xem dữ liệu của chính mình, không xem chéo lớp.
 - Check-in success/error contract cho mobile frontend: đã có test.
 - Backend test: `45` test pass.

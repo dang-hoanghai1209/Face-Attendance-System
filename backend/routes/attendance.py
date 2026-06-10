@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services import attendance_service
-from services.auth_service import get_current_user, require_admin, require_role
+from services.auth_service import get_current_user, require_role
 
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 logger = logging.getLogger("face_attendance")
-require_attendance_editor = require_role("admin", "teacher")
+require_attendance_editor = require_role("admin", "teacher", "lecturer")
 
 
 class AttendanceCheckIn(BaseModel):
@@ -37,6 +37,15 @@ class ManualAttendanceCreate(BaseModel):
     session_id: int
     note: Optional[str] = None
     audit_id: Optional[int] = None
+
+
+def require_manual_attendance_editor(current_user=Depends(get_current_user)):
+    if current_user.role not in {"admin", "teacher", "lecturer"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Bạn không có quyền xác nhận điểm danh thủ công.",
+        )
+    return current_user
 
 
 def _checkin_response(db: Session, data: AttendanceCheckIn):
@@ -98,7 +107,7 @@ def record_checkout(data: AttendanceCheckOut, current_user=Depends(get_current_u
 @router.post("/manual")
 def record_manual_attendance(
     data: ManualAttendanceCreate,
-    current_user=Depends(require_admin),
+    current_user=Depends(require_manual_attendance_editor),
     db: Session = Depends(get_db),
 ):
     logger.info(

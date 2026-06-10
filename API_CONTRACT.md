@@ -25,6 +25,14 @@ Trạng thái: bản nháp kỹ thuật cho giai đoạn mở rộng Mobile-Firs
 - `POST /auth/login`
 - `GET /auth/me`
 
+Response của `POST /auth/login` và `GET /auth/me` với user role `student` bao gồm thêm:
+
+- `student_id`
+- `student_code`
+- `full_name`
+
+Với role khác `student`, các field này trả `null` nếu không map được sang sinh viên.
+
 ### Students
 
 - `GET /students/`
@@ -75,6 +83,13 @@ Session hiện tại vẫn dùng `subject`, `class_name`, `session_date`, `start
 - `GET /reports/model-evaluation/stats`
 - `GET /reports/model-evaluation/details`
 - `GET /reports/model-evaluation/export`
+
+Quyền đọc báo cáo hiện tại:
+
+- `admin`: xem toàn bộ.
+- `viewer`: xem báo cáo chỉ đọc.
+- `teacher`/`lecturer`: chỉ xem dữ liệu được backend xác định là thuộc quyền phụ trách.
+- `student`: chỉ xem lịch sử điểm danh của chính mình ở report session; không xem summary lớp.
 
 ## Endpoint Đề Xuất
 
@@ -225,10 +240,10 @@ Response:
 
 #### GET /students/me/active-sessions
 
-MVP dev mode dùng query `student_id` trong khi chưa có liên kết tài khoản sinh viên hoàn chỉnh:
+Backend ưu tiên `current_user` có role `student` để tự xác định `student_id` từ token. Query `student_id` chỉ còn là chế độ dev/fallback cho trường hợp chưa có liên kết tài khoản hoàn chỉnh.
 
 ```text
-GET /students/me/active-sessions?student_id=52
+GET /students/me/active-sessions
 ```
 
 Chỉ trả các buổi học thuộc lớp học phần mà sinh viên có enrollment `active`. Thời gian được tính theo `Asia/Ho_Chi_Minh`.
@@ -521,3 +536,10 @@ Nếu quá 15 phút đầu:
   "detail": "Đã quá thời gian điểm danh. Hệ thống chỉ cho phép điểm danh trong 15 phút đầu buổi học."
 }
 ```
+
+## Lưu Ý Quản Trị Quyền
+
+- `POST /attendance/manual` chỉ cho `admin`, `teacher`, `lecturer`.
+- `GET /reports/dashboard/stats` trả dữ liệu theo role: admin/viewer xem toàn bộ, student xem cá nhân, lecturer/teacher xem phạm vi phụ trách khi backend xác định được.
+- `GET /reports/session/{session_id}` với `student` chỉ trả dữ liệu của chính sinh viên đó.
+- `GET /reports/summary/{class_name}` và các export theo lớp không dành cho `student`.

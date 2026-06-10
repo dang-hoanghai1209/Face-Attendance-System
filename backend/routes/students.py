@@ -17,7 +17,7 @@ from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
 from services.attendance_service import LATE_THRESHOLD_MINUTES
-from services.auth_service import get_current_user, require_admin
+from services.auth_service import get_current_user, require_admin, resolve_student_for_user
 from services.class_service import VALID_CLASS_SET, student_code_matches_class
 from services.timezone_service import now_in_app_timezone
 
@@ -167,8 +167,16 @@ def _mobile_session_status(session: ClassSession, now_value: datetime):
 
 
 @router.get("/me/active-sessions")
-def get_my_active_sessions(student_id: int, db: Session = Depends(get_db)):
-    student = db.query(Student).filter(Student.id == student_id).first()
+def get_my_active_sessions(
+    current_user=Depends(get_current_user),
+    student_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    student = resolve_student_for_user(db, current_user)
+    if student is None:
+        if student_id is None:
+            raise HTTPException(status_code=400, detail="Vui lòng cung cấp student_id khi dùng chế độ dev.")
+        student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Không tìm thấy sinh viên.")
 
@@ -180,7 +188,7 @@ def get_my_active_sessions(student_id: int, db: Session = Depends(get_db)):
         .join(Subject, CourseSection.subject_id == Subject.id)
         .outerjoin(Classroom, ClassSession.classroom_id == Classroom.id)
         .filter(
-            Enrollment.student_id == student_id,
+            Enrollment.student_id == student.id,
             Enrollment.status == "active",
         )
         .order_by(ClassSession.session_date.asc(), ClassSession.start_time.asc())

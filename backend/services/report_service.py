@@ -1,13 +1,15 @@
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from models.attendance import Attendance
+from models.course_section import CourseSection
 from models.enrollment import Enrollment
 from models.session import Session as ClassSession
 from models.student import Student
+from services.auth_service import resolve_student_for_user
 
 
 ATTENDED_STATUSES = {"present", "late", "manual"}
@@ -251,3 +253,217 @@ def get_dashboard_stats(db: Session):
             {"name": "Absent", "value": total_absent},
         ],
     }
+
+
+def _identity_values(user):
+    values = {getattr(user, "username", None), getattr(user, "full_name", None)}
+    return [value for value in values if value]
+
+
+def _owned_session_query(db: Session, user):
+    identities = _identity_values(user)
+    if user.role in {"admin", "viewer"}:
+        return db.query(ClassSession)
+    if not identities:
+        return db.query(ClassSession).filter(False)
+
+    return (
+        db.query(ClassSession)
+        .outerjoin(CourseSection, ClassSession.section_id == CourseSection.id)
+        .filter(
+            or_(
+                ClassSession.created_by.in_(identities),
+                CourseSection.lecturer_name.in_(identities),
+            )
+        )
+    )
+
+
+def get_dashboard_stats_for_user(db: Session, user):
+    if user.role in {"admin", "viewer"}:
+        return get_dashboard_stats(db)
+
+    if user.role == "student":
+        student = resolve_student_for_user(db, user)
+        if not student:
+            return {
+                "total_students": 0,
+                "registered_faces": 0,
+                "unregistered_faces": 0,
+                "total_sessions": 0,
+                "avg_attendance_rate": 0,
+                "warning_count": 0,
+                "pie_data": [{"name": "Present", "value": 0}, {"name": "Absent", "value": 0}],
+            }
+
+        session_ids = [
+            row.id
+            for row in (
+                db.query(ClassSession.id)
+                .join(Enrollment, Enrollment.course_section_id == ClassSession.section_id)
+                .filter(Enrollment.student_id == student.id, Enrollment.status == "active")
+                .filter(ClassSession.section_id.isnot(None))
+                .distinct()
+                .all()
+            )
+        ]
+        total_sessions = len(session_ids)
+        attended = (
+            db.query(func.count(func.distinct(Attendance.session_id)))
+            .filter(
+                Attendance.student_id == student.id,
+                Attendance.session_id.in_(session_ids) if session_ids else False,
+                Attendance.status.in_(ATTENDED_STATUSES),
+            )
+            .scalar()
+            or 0
+        )
+        absent = max(total_sessions - attended, 0)
+        rate = (attended / total_sessions) if total_sessions > 0 else 0
+        return {
+            "total_students": 1,
+            "registered_faces": 1 if student.face_status == "registered" else 0,
+            "unregistered_faces": 0 if student.face_status == "registered" else 1,
+            "total_sessions": total_sessions,
+            "avg_attendance_rate": round(rate, 2),
+            "warning_count": 1 if total_sessions > 0 and rate < 0.8 else 0,
+            "pie_data": [
+                {"name": "Present", "value": attended},
+                {"name": "Absent", "value": absent},
+            ],
+        }
+
+    owned_sessions = _owned_session_query(db, user)
+    owned_session_ids = [row.id for row in owned_sessions.with_entities(ClassSession.id).all()]
+    if not owned_session_ids:
+        return {
+            "total_students": 0,
+            "registered_faces": 0,
+            "unregistered_faces": 0,
+            "total_sessions": 0,
+            "avg_attendance_rate": 0,
+            "warning_count": 0,
+            "pie_data": [{"name": "Present", "value": 0}, {"name": "Absent", "value": 0}],
+        }
+
+    student_ids = [
+        row.student_id
+        for row in (
+            db.query(Enrollment.student_id)
+            .join(ClassSession, ClassSession.section_id == Enrollment.course_section_id)
+            .filter(Enrollment.status == "active", ClassSession.id.in_(owned_session_ids))
+            .distinct()
+            .all()
+        )
+    ]
+    total_students = len(student_ids)
+    registered_faces = (
+        db.query(Student)
+        .filter(Student.id.in_(student_ids), Student.face_status == "registered")
+        .count()
+        if student_ids
+        else 0
+    )
+    unregistered_faces = max(total_students - registered_faces, 0)
+    total_sessions = len(owned_session_ids)
+    attended = (
+        db.query(func.count(func.distinct(Attendance.id)))
+        .filter(
+            Attendance.session_id.in_(owned_session_ids),
+            Attendance.status.in_(ATTENDED_STATUSES),
+        )
+        .scalar()
+        or 0
+    )
+    total_expected = total_students * total_sessions
+    warning_count = 0
+    if total_sessions > 0:
+        attendance_counts = {
+            row.student_id: row.cnt
+            for row in (
+                db.query(Attendance.student_id, func.count(func.distinct(Attendance.session_id)).label("cnt"))
+                .filter(Attendance.session_id.in_(owned_session_ids), Attendance.status.in_(ATTENDED_STATUSES))
+                .group_by(Attendance.student_id)
+                .all()
+            )
+        }
+        warning_count = sum(1 for student_id in student_ids if total_sessions > 0 and (attendance_counts.get(student_id, 0) / total_sessions) < 0.8)
+
+    rate = (attended / total_expected) if total_expected > 0 else 0
+    return {
+        "total_students": total_students,
+        "registered_faces": registered_faces,
+        "unregistered_faces": unregistered_faces,
+        "total_sessions": total_sessions,
+        "avg_attendance_rate": round(rate, 2),
+        "warning_count": warning_count,
+        "pie_data": [
+            {"name": "Present", "value": attended},
+            {"name": "Absent", "value": max(total_expected - attended, 0)},
+        ],
+    }
+
+
+def user_can_access_class_report(db: Session, user, class_name: str) -> bool:
+    if user.role in {"admin", "viewer"}:
+        return True
+    if user.role == "student":
+        return False
+
+    identities = _identity_values(user)
+    if not identities:
+        return False
+
+    return (
+        db.query(ClassSession.id)
+        .outerjoin(CourseSection, ClassSession.section_id == CourseSection.id)
+        .filter(
+            ClassSession.class_name == class_name,
+            or_(
+                ClassSession.created_by.in_(identities),
+                CourseSection.lecturer_name.in_(identities),
+            ),
+        )
+        .first()
+        is not None
+    )
+
+
+def build_class_summary_for_user(class_name: str, db: Session, user):
+    if not user_can_access_class_report(db, user, class_name):
+        raise HTTPException(status_code=403, detail="Bạn không có quyền xem báo cáo lớp học này.")
+    return build_class_summary(class_name, db)
+
+
+def build_session_report_for_user(session_id: int, db: Session, user):
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Không tìm thấy buổi học.")
+
+    if user.role in {"admin", "viewer"}:
+        return build_session_report(session_id, db)
+
+    if user.role == "student":
+        student = resolve_student_for_user(db, user)
+        if not student:
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ sinh viên.")
+        _session, report_rows = build_session_report(session_id, db)
+        return _session, [row for row in report_rows if row["student_code"] == student.student_code]
+
+    identities = _identity_values(user)
+    owns_session = (
+        db.query(ClassSession.id)
+        .outerjoin(CourseSection, ClassSession.section_id == CourseSection.id)
+        .filter(
+            ClassSession.id == session_id,
+            or_(
+                ClassSession.created_by.in_(identities),
+                CourseSection.lecturer_name.in_(identities),
+            ),
+        )
+        .first()
+        is not None
+    )
+    if not owns_session:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền xem báo cáo buổi học này.")
+    return build_session_report(session_id, db)

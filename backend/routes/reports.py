@@ -352,8 +352,8 @@ def _format_excel_sheet(worksheet):
 
 
 @router.get("/dashboard/stats")
-def get_dashboard_stats(_current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    return report_service.get_dashboard_stats(db)
+def get_dashboard_stats(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    return report_service.get_dashboard_stats_for_user(db, current_user)
 
 
 @router.get("/model-evaluation/stats")
@@ -448,25 +448,25 @@ def export_model_evaluation_excel(_current_user=Depends(require_admin)):
 
 
 @router.get("/summary/{class_name}")
-def get_summary_by_class(class_name: str, _current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    return report_service.build_class_summary(class_name, db)
+def get_summary_by_class(class_name: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    return report_service.build_class_summary_for_user(class_name, db, current_user)
 
 
 @router.get("/warnings/{class_name}")
-def get_warnings_by_class(class_name: str, _current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    summary = report_service.build_class_summary(class_name, db)
+def get_warnings_by_class(class_name: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    summary = report_service.build_class_summary_for_user(class_name, db, current_user)
     return [item for item in summary if item["warning"]]
 
 
 @router.get("/session/{session_id}")
-def get_session_report(session_id: int, _current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    _session, report_rows = report_service.build_session_report(session_id, db)
+def get_session_report(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    _session, report_rows = report_service.build_session_report_for_user(session_id, db, current_user)
     return report_rows
 
 
 @router.get("/export/excel/{class_name}")
-def export_excel(class_name: str, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
-    summary = report_service.build_class_summary(class_name, db)
+def export_excel(class_name: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    summary = report_service.build_class_summary_for_user(class_name, db, current_user)
     if not summary:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu trong lớp này.")
 
@@ -488,8 +488,8 @@ def export_excel(class_name: str, _current_user=Depends(require_admin), db: Sess
 
 
 @router.get("/export/pdf/{class_name}")
-def export_pdf(class_name: str, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
-    summary = report_service.build_class_summary(class_name, db)
+def export_pdf(class_name: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    summary = report_service.build_class_summary_for_user(class_name, db, current_user)
     if not summary:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu trong lớp này.")
 
@@ -532,8 +532,8 @@ def export_pdf(class_name: str, _current_user=Depends(require_admin), db: Sessio
 
 
 @router.get("/export/excel/warnings/{class_name}")
-def export_warning_excel(class_name: str, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
-    summary = report_service.build_class_summary(class_name, db)
+def export_warning_excel(class_name: str, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    summary = report_service.build_class_summary_for_user(class_name, db, current_user)
     if not summary:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu của lớp này.")
 
@@ -553,8 +553,8 @@ def export_warning_excel(class_name: str, _current_user=Depends(require_admin), 
 
 
 @router.get("/export/excel/session/{session_id}")
-def export_session_excel(session_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
-    session, rows = report_service.build_session_report(session_id, db)
+def export_session_excel(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    session, rows = report_service.build_session_report_for_user(session_id, db, current_user)
     if not rows:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu của buổi học này.")
 
@@ -575,8 +575,8 @@ def export_session_excel(session_id: int, _current_user=Depends(require_admin), 
 
 
 @router.get("/export/pdf/session/{session_id}")
-def export_session_pdf(session_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
-    session, rows = report_service.build_session_report(session_id, db)
+def export_session_pdf(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    session, rows = report_service.build_session_report_for_user(session_id, db, current_user)
     if not rows:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu của buổi học này.")
 

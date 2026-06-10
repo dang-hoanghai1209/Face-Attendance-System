@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.student import Student
 from models.user import User
 
 
@@ -155,6 +156,12 @@ def get_current_user(
     if user.role not in VALID_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vai trò tài khoản không được phép truy cập.")
     return user
+
+
+def resolve_student_for_user(db: Session, user: User) -> Student | None:
+    if user.role != "student":
+        return None
+    return db.query(Student).filter(Student.student_code == user.username).first()
 
 
 def require_role(*roles: str):

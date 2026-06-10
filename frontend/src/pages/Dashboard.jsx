@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 
 import api from '../../api/axios.js'
+import { useAuth } from '../auth/auth-context.js'
 import { VALID_CLASSES } from '../constants/classes.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 
@@ -24,6 +25,8 @@ export default function Dashboard() {
   const [stats,   setStats]   = useState(fallbackStats)
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
+  const [deferredPrompt, setDeferredPrompt] = useState(null)
+  const [showInstallBanner, setShowInstallBanner] = useState(false)
 
   const load = useCallback(async (isMounted = () => true) => {
     setLoading(true)
@@ -49,11 +52,41 @@ export default function Dashboard() {
     }
   }, [load])
 
+  useEffect(() => {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone
+    if (isStandalone) return
+
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+      setShowInstallBanner(true)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    }
+  }, [])
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return
+    deferredPrompt.prompt()
+    const { outcome } = await deferredPrompt.userChoice
+    if (outcome === 'accepted') {
+      console.log('User accepted NTU Face Attendance PWA installation')
+    }
+    setDeferredPrompt(null)
+    setShowInstallBanner(false)
+  }
+
+  const { user } = useAuth()
+  const isStudent = user?.role === 'student'
+
   const chartData = stats.pie_data.map(i => ({ ...i, name: pieLabels[i.name]||i.name }))
   const hasData   = chartData.some(i => i.value > 0)
   const regRate   = stats.total_students ? Math.round(stats.registered_faces/stats.total_students*100) : 0
 
-  const CARDS = [
+  const adminCards = [
     { label:'Tổng sinh viên',           value: stats.total_students,              delta: `${VALID_CLASSES.length} lớp chính thức` },
     { label:'Đã đăng ký khuôn mặt',     value: stats.registered_faces,            delta: `${regRate}% hoàn thành` },
     { label:'Chưa đăng ký',             value: stats.unregistered_faces,           delta: 'Cần xử lý' },
@@ -61,6 +94,49 @@ export default function Dashboard() {
     { label:'Chuyên cần trung bình',    value: fmt(stats.avg_attendance_rate),    delta: 'Ngưỡng tối thiểu 80%' },
     { label:'Sinh viên cảnh báo',       value: `${stats.warning_count} SV`,       delta: 'Dưới 80% chuyên cần' },
   ]
+
+  const studentCards = [
+    { label:'Trạng thái khuôn mặt',     value: stats.registered_faces ? 'Đã đăng ký' : 'Chưa đăng ký', delta: stats.registered_faces ? 'Sẵn sàng điểm danh' : 'Cần liên hệ Admin/Giảng viên' },
+    { label:'Tổng buổi học của bạn',    value: stats.total_sessions,              delta: 'Theo thời khóa biểu lớp học phần' },
+    { label:'Tỷ lệ chuyên cần cá nhân', value: fmt(stats.avg_attendance_rate),    delta: 'Yêu cầu tối thiểu 80%' },
+  ]
+  const CARDS = isStudent ? studentCards : adminCards
+
+  const getFilteredQuickActions = () => {
+    const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
+    const isAdmin = user?.role === 'admin'
+
+    const actions = []
+    if (isAdmin) {
+      actions.push({ to: '/students', icon: '👤', label: 'Sinh viên', desc: 'Thêm và quản lý danh sách sinh viên theo lớp.' })
+      actions.push({ to: '/sessions', icon: '📅', label: 'Buổi học', desc: 'Tạo lịch học theo môn, lớp và khung giờ.' })
+      actions.push({ to: '/faces/register', icon: '📸', label: 'Đăng ký khuôn mặt', desc: 'Chụp mẫu bằng camera và lưu đặc trưng khuôn mặt.' })
+    }
+    if (isLecturerOrAdmin) {
+      actions.push({ to: '/course-management', icon: '👥', label: 'Quản lý học phần', desc: 'Quản lý môn học, phòng học, lớp học phần và xếp lịch.' })
+    }
+    actions.push({ to: '/attendance', icon: '✅', label: 'Điểm danh', desc: 'Nhận diện để ghi nhận vào lớp hoặc ra về.' })
+    actions.push({ to: '/reports', icon: '📊', label: 'Báo cáo', desc: isStudent ? 'Xem lịch sử chuyên cần cá nhân.' : 'Xem cảnh báo chuyên cần và xuất báo cáo Excel hoặc PDF.' })
+    return actions
+  }
+
+  const adminAlerts = [
+    { type:'danger', icon:'🚨', title:`${stats.warning_count} SV dưới ngưỡng chuyên cần`, sub:'Xem báo cáo cảnh báo để liên hệ sinh viên.' },
+    { type:'warning', icon:'⚠️', title:`${stats.unregistered_faces} SV chưa đăng ký khuôn mặt`, sub:'Không thể điểm danh tự động — cần đăng ký trước.' },
+    { type:'info', icon:'💡', title:'Quy trình minh họa', sub:'Sinh viên → Buổi học → Khuôn mặt → Điểm danh → Báo cáo.' },
+  ]
+
+  const studentAlerts = []
+  if (stats.warning_count > 0) {
+    studentAlerts.push({ type: 'danger', icon: '🚨', title: 'Bạn đang dưới ngưỡng chuyên cần (80%)', sub: 'Vui lòng tham gia các buổi học đầy đủ để tránh ảnh hưởng kết quả.' })
+  }
+  if (!stats.registered_faces) {
+    studentAlerts.push({ type: 'warning', icon: '⚠️', title: 'Chưa đăng ký khuôn mặt', sub: 'Tài khoản chưa có dữ liệu khuôn mặt. Hãy liên hệ Giảng viên/Admin để đăng ký mẫu.' })
+  }
+  studentAlerts.push({ type: 'info', icon: '💡', title: 'Hướng dẫn điểm danh', sub: 'Bật GPS -> Chọn buổi học -> Nhìn thẳng camera -> Ghi nhận điểm danh.' })
+
+  const ALERTS = isStudent ? studentAlerts : adminAlerts
+  const filteredQuickActions = getFilteredQuickActions()
 
   return (
     <div>
@@ -74,6 +150,32 @@ export default function Dashboard() {
           {loading ? 'Đang tải...' : '🔄 Tải lại'}
         </button>
       </div>
+
+      {showInstallBanner && (
+        <div className="panel panel-pad" style={{
+          background: 'rgba(0, 201, 167, 0.08)',
+          borderColor: 'rgba(0, 201, 167, 0.3)',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 16,
+          flexWrap: 'wrap',
+          animation: 'fadeUp 0.35s ease both'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 24 }}>📱</span>
+            <div>
+              <strong style={{ fontSize: 13, color: 'var(--white)', display: 'block', marginBottom: 2 }}>Cài đặt ứng dụng di động</strong>
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--white2)' }}>Cài đặt NTU Face Attendance vào màn hình chính để sử dụng mượt mà, tiện lợi hơn trên điện thoại.</p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="secondary" onClick={() => setShowInstallBanner(false)} style={{ minHeight: 36, padding: '6px 12px', fontSize: 12 }}>Bỏ qua</button>
+            <button onClick={handleInstallClick} style={{ minHeight: 36, padding: '6px 12px', fontSize: 12 }}>Cài đặt ngay</button>
+          </div>
+        </div>
+      )}
 
       {error && <p className="status-message error">⚠️ {error}</p>}
 
@@ -91,9 +193,11 @@ export default function Dashboard() {
       {/* Charts + alerts */}
       <div className="grid two" style={{ marginBottom: 18 }}>
         <div className="panel panel-pad">
-          <h3 style={{ marginTop:0, marginBottom:14, fontSize:14 }}>Tỷ lệ chuyên cần toàn hệ thống</h3>
+          <h3 style={{ marginTop:0, marginBottom:14, fontSize:14 }}>
+            {isStudent ? 'Tỷ lệ chuyên cần của bạn' : 'Tỷ lệ chuyên cần toàn hệ thống'}
+          </h3>
           {!hasData
-            ? <div className="empty-state">Chưa có dữ liệu điểm danh. Hãy tạo buổi học và ghi nhận vào lớp để biểu đồ có số liệu.</div>
+            ? <div className="empty-state">{isStudent ? 'Chưa có dữ liệu điểm danh cá nhân.' : 'Chưa có dữ liệu điểm danh. Hãy tạo buổi học và ghi nhận vào lớp để biểu đồ có số liệu.'}</div>
             : <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
                   <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={95} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`}>
@@ -110,11 +214,7 @@ export default function Dashboard() {
 
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {/* Alert cards */}
-          {[
-            { type:'danger', icon:'🚨', title:`${stats.warning_count} SV dưới ngưỡng chuyên cần`, sub:'Xem báo cáo cảnh báo để liên hệ sinh viên.' },
-            { type:'warning', icon:'⚠️', title:`${stats.unregistered_faces} SV chưa đăng ký khuôn mặt`, sub:'Không thể điểm danh tự động — cần đăng ký trước.' },
-            { type:'info', icon:'💡', title:'Quy trình minh họa', sub:'Sinh viên → Buổi học → Khuôn mặt → Điểm danh → Báo cáo.' },
-          ].map(a=>(
+          {ALERTS.map(a=>(
             <div key={a.title} className="panel panel-pad" style={{
               background: a.type==='danger' ? 'rgba(244,63,94,.06)' : a.type==='warning' ? 'rgba(245,158,11,.06)' : 'rgba(59,130,246,.06)',
               borderColor: a.type==='danger' ? 'rgba(244,63,94,.2)' : a.type==='warning' ? 'rgba(245,158,11,.2)' : 'rgba(59,130,246,.2)',
@@ -134,7 +234,7 @@ export default function Dashboard() {
       {/* Quick actions */}
       <h3 style={{ marginBottom:12, fontSize:14, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.07em' }}>Thao tác nhanh</h3>
       <div className="grid cards">
-        {quickActions.map((a,i)=>(
+        {filteredQuickActions.map((a,i)=>(
           <Link key={a.to} to={a.to} style={{ textDecoration:'none' }}>
             <div className="panel panel-pad" style={{ cursor:'pointer', transition:'all .2s', position:'relative', overflow:'hidden' }}
               onMouseEnter={e=>{e.currentTarget.style.background='var(--card2)';e.currentTarget.style.transform='translateY(-2px)'}}

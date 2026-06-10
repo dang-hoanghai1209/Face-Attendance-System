@@ -308,6 +308,57 @@ export default function Students() {
         </table>
       </div>
 
+      {/* Mobile Card Layout */}
+      <div className="mobile-card-list">
+        {filtered.length === 0 ? (
+          <div className="empty-state">
+            {search ? 'Không tìm thấy sinh viên phù hợp.' : 'Chưa có sinh viên nào.'}
+          </div>
+        ) : (
+          filtered.map((student) => {
+            const source = student.data_source || 'real'
+            return (
+              <div key={student.id} className="mobile-card">
+                <div className="mobile-card-header">
+                  <span className="mobile-card-title" style={{ color: 'var(--teal)', fontFamily: 'var(--mono)', fontSize: '14px', fontWeight: 700 }}>
+                    {student.student_code}
+                  </span>
+                  <span className={`badge ${student.face_status === 'registered' ? 'success' : 'warning'}`}>
+                    {student.face_status === 'registered' ? 'Đã đăng ký' : 'Chưa đăng ký'}
+                  </span>
+                </div>
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">Họ tên:</span>
+                  <span className="mobile-card-value">{student.full_name}</span>
+                </div>
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">Lớp:</span>
+                  <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>{student.class_name || '-'}</span>
+                </div>
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">Nguồn:</span>
+                  <span className={`badge ${SOURCE_BADGES[source] || 'danger'}`}>
+                    {SOURCE_LABELS[source] || source}
+                  </span>
+                </div>
+                <div className="mobile-card-actions">
+                  <button className="secondary" onClick={() => handleEdit(student)} disabled={loading}>
+                    Sửa
+                  </button>
+                  <button
+                    style={{ background: 'rgba(244,63,94,.1)', color: 'var(--red)', border: '1px solid rgba(244,63,94,.2)' }}
+                    onClick={() => handleDelete(student.id, student.full_name)}
+                    disabled={loading}
+                  >
+                    Xóa
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
       {deleteTarget && (
         <div
           role="dialog"
@@ -324,23 +375,24 @@ export default function Students() {
             padding:16
           }}
         >
-          <div style={{ width:'min(460px, 100%)', background:'#ffffff', border:'1px solid #e5e7eb', borderRadius:12, padding:20, boxShadow:'0 24px 90px rgba(0,0,0,.5)' }}>
-            <h2 id="delete-student-title" style={{ margin:'0 0 8px', fontSize:18, color:'#111827' }}>Xóa sinh viên</h2>
-            <p style={{ margin:'0 0 16px', color:'#374151', lineHeight:1.55 }}>
-              Bạn có chắc muốn xóa sinh viên <strong style={{ color:'#111827' }}>{deleteTarget.name}</strong>? Dữ liệu điểm danh và khuôn mặt liên quan cũng sẽ bị xóa.
+          <div style={{ width:'min(460px, 100%)', background:'var(--navy2)', border:'1px solid var(--bdr2)', borderRadius:12, padding:20, boxShadow:'var(--shadow)' }}>
+            <h2 id="delete-student-title" style={{ margin:'0 0 8px', fontSize:18, color:'var(--white)' }}>Xóa sinh viên</h2>
+            <p style={{ margin:'0 0 16px', color:'var(--white2)', lineHeight:1.55 }}>
+              Bạn có chắc muốn xóa sinh viên <strong style={{ color:'var(--white)' }}>{deleteTarget.name}</strong>? Dữ liệu điểm danh và khuôn mặt liên quan cũng sẽ bị xóa.
             </p>
             <div className="toolbar" style={{ justifyContent:'flex-end' }}>
               <button
                 onClick={() => setDeleteTarget(null)}
                 disabled={loading}
-                style={{ background:'#f3f4f6', border:'1px solid #d1d5db', color:'#111827' }}
+                className="secondary"
+                style={{ minHeight:38 }}
               >
                 Hủy
               </button>
               <button
                 onClick={confirmDelete}
                 disabled={loading}
-                style={{ background:'#dc2626', border:'1px solid #b91c1c', color:'#ffffff' }}
+                style={{ background:'var(--red)', color:'#ffffff', minHeight:38 }}
               >
                 {loading ? 'Đang xóa...' : 'Xóa'}
               </button>

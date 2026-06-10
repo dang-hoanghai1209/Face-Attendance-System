@@ -70,7 +70,8 @@ const getClassMismatchMessage = (student, session) =>
 export default function Attendance() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const canDeleteAttendance = user?.role === 'admin' || user?.role === 'teacher'
+  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
+  const canDeleteAttendance = isLecturerOrAdmin
   const videoRef  = useRef(null)
   const canvasRef = useRef(null)
 
@@ -134,15 +135,22 @@ export default function Attendance() {
   const fetchSessionsForUser = async (currentUser) => {
     if (currentUser?.role === 'student') {
       try {
-        const studentsRes = await api.get('/students/')
-        const me = studentsRes.data.find(s => s.student_code === currentUser.username)
-        if (me) {
-          const activeRes = await api.get(`/students/me/active-sessions?student_id=${me.id}`)
-          return activeRes.data
-        }
-        throw new Error('Không tìm thấy thông tin sinh viên khớp với tài khoản đăng nhập.')
+        // Ưu tiên gọi thẳng endpoint active-sessions không truyền student_id khi đã có JWT
+        const activeRes = await api.get('/students/me/active-sessions')
+        return activeRes.data
       } catch (err) {
-        console.warn('Không gọi được active-sessions, tự động fallback sang sessions chính:', err)
+        console.warn('Không gọi được active-sessions không tham số, thử với student_id fallback:', err)
+        const studentIdFallback = currentUser?.student_id || currentUser?.id
+        if (studentIdFallback) {
+          try {
+            const fallbackRes = await api.get(`/students/me/active-sessions?student_id=${studentIdFallback}`)
+            return fallbackRes.data
+          } catch (fbErr) {
+            console.warn('Fallback active-sessions với student_id thất bại:', fbErr)
+          }
+        }
+        // Fallback cuối cùng sang sessions chính
+        console.warn('Tự động fallback sang sessions chính')
         const fallbackRes = await api.get('/sessions/')
         return fallbackRes.data
       }
@@ -259,6 +267,10 @@ export default function Attendance() {
 
   const confirmPendingRecognition = async () => {
     if (!pendingRecognition) return
+    if (!isLecturerOrAdmin) {
+      setMessage('Lỗi: Bạn không có quyền thực hiện xác nhận thủ công.')
+      return
+    }
     setLoading(true)
     try {
       if (pendingRecognition.requiresManualConfirmation) {
@@ -419,6 +431,10 @@ export default function Attendance() {
 
   const deleteAttendanceRecord = async (record) => {
     if (!record?.record_id) return
+    if (!canDeleteAttendance) {
+      setMessage('Lỗi: Bạn không có quyền xóa bản ghi điểm danh.')
+      return
+    }
 
     const studentLabel = `${record.student_code || '-'} - ${record.full_name || '-'}`
     const confirmed = window.confirm(
@@ -664,16 +680,24 @@ export default function Attendance() {
               )}
 
               <p style={{ fontSize: '13px', color: style.muted, margin: '8px 0 0 0' }}>
-                {result?.message || message}
+                {!isLecturerOrAdmin && (result?.status === 'uncertain' || result?.status === 'blocked')
+                  ? 'Kết quả cần giảng viên xác nhận. Vui lòng liên hệ giảng viên phụ trách.'
+                  : (result?.message || message)}
               </p>
 
               {pendingRecognition && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '12px' }}>
-                  <button onClick={confirmPendingRecognition} disabled={loading} style={{ minHeight: 48, width: '100%', justifyContent: 'center' }}>
-                    {pendingRecognition.requiresManualConfirmation ? 'Xác nhận thủ công' : `Xác nhận ${actionLabels[pendingRecognition.action]}`}
-                  </button>
+                  {isLecturerOrAdmin ? (
+                    <button onClick={confirmPendingRecognition} disabled={loading} style={{ minHeight: 48, width: '100%', justifyContent: 'center' }}>
+                      {pendingRecognition.requiresManualConfirmation ? 'Xác nhận thủ công' : `Xác nhận ${actionLabels[pendingRecognition.action]}`}
+                    </button>
+                  ) : (
+                    <div style={{ padding: '10px', background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: 'var(--amber)', borderRadius: 'var(--r-sm)', fontSize: '13px', textAlign: 'center', fontWeight: '500' }}>
+                      Kết quả cần giảng viên xác nhận. Vui lòng liên hệ giảng viên phụ trách.
+                    </div>
+                  )}
                   <button className="secondary" onClick={rejectPendingRecognition} disabled={loading} style={{ minHeight: 48, width: '100%', justifyContent: 'center' }}>
-                    Hủy kết quả & Quét lại
+                    {isLecturerOrAdmin ? 'Hủy kết quả & Quét lại' : 'Quét lại'}
                   </button>
                 </div>
               )}
@@ -839,16 +863,28 @@ export default function Attendance() {
                     {result.success && result.action && (
                       <p>Trạng thái ghi nhận: Đã ghi nhận {actionLabels[result.action]}</p>
                     )}
-                    <p style={{ color: getStyle(result.status).muted }}>{result.message}</p>
+                    <p style={{ color: getStyle(result.status).muted }}>
+                      {!isLecturerOrAdmin && (result.status === 'uncertain' || result.status === 'blocked')
+                        ? 'Kết quả cần giảng viên xác nhận. Vui lòng liên hệ giảng viên phụ trách.'
+                        : result.message}
+                    </p>
 
                     {pendingRecognition && (
                       <div className="toolbar" style={{ marginTop: 12 }}>
-                        <button onClick={confirmPendingRecognition} disabled={loading}>
-                          {pendingRecognition.requiresManualConfirmation ? 'Xác nhận thủ công' : `Xác nhận ${actionLabels[pendingRecognition.action]}`}
-                        </button>
-                        <button className="secondary" onClick={rejectPendingRecognition} disabled={loading}>
-                          Hủy kết quả
-                        </button>
+                        {isLecturerOrAdmin ? (
+                          <>
+                            <button onClick={confirmPendingRecognition} disabled={loading}>
+                              {pendingRecognition.requiresManualConfirmation ? 'Xác nhận thủ công' : `Xác nhận ${actionLabels[pendingRecognition.action]}`}
+                            </button>
+                            <button className="secondary" onClick={rejectPendingRecognition} disabled={loading}>
+                              Hủy kết quả
+                            </button>
+                          </>
+                        ) : (
+                          <div style={{ padding: '8px 12px', background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.3)', color: 'var(--amber)', borderRadius: 'var(--r-sm)', fontSize: '13px', fontWeight: '500' }}>
+                            Kết quả cần giảng viên xác nhận. Vui lòng liên hệ giảng viên phụ trách.
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

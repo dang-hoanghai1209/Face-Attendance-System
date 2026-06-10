@@ -77,6 +77,14 @@ export default function Reports() {
     [sessions, selectedSessionId],
   )
 
+  const handleReportError = (err, fallback) => {
+    if (err.response?.status === 403) {
+      setError('Bạn không có quyền xem báo cáo này.')
+    } else {
+      setError(getApiErrorMessage(err, fallback))
+    }
+  }
+
   // ── Load báo cáo theo lớp ──────────────────────────────────────── //
   const loadClassReports = async (cls = className) => {
     if (!cls) {
@@ -96,7 +104,7 @@ export default function Reports() {
       setError('')
       setMessage(`Đã tải báo cáo lớp ${cls}.`)
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Không tải được báo cáo lớp.'))
+      handleReportError(err, 'Không tải được báo cáo lớp.')
       setData([])
       setWarnings([])
     } finally {
@@ -112,7 +120,7 @@ export default function Reports() {
       if (!selectedSessionId && res.data.length > 0)
         setSelectedSessionId(String(res.data[0].id))
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Không tải được danh sách buổi học.'))
+      handleReportError(err, 'Không tải được danh sách buổi học.')
     }
   }
 
@@ -125,7 +133,7 @@ export default function Reports() {
       setSessionRows(res.data)
       setError('')
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Không tải được báo cáo buổi học.'))
+      handleReportError(err, 'Không tải được báo cáo buổi học.')
       setSessionRows([])
     } finally {
       setLoading(false)
@@ -142,7 +150,7 @@ export default function Reports() {
       setModelEvaluation(statsRes.data)
       setModelEvalDetails(detailsRes.data?.items || [])
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Không tải được kết quả đánh giá mô hình.'))
+      handleReportError(err, 'Không tải được kết quả đánh giá mô hình.')
       setModelEvaluation(null)
       setModelEvalDetails([])
     } finally {
@@ -162,7 +170,7 @@ export default function Reports() {
           setSelectedSessionId(String(sessionRes.data[0].id))
         if (isAdmin) await loadModelEvaluation()
       } catch (err) {
-        if (mounted) setError(getApiErrorMessage(err, 'Không tải được dữ liệu báo cáo.'))
+        if (mounted) handleReportError(err, 'Không tải được dữ liệu báo cáo.')
       }
     }
     init()
@@ -177,7 +185,7 @@ export default function Reports() {
         const res = await api.get(`/reports/session/${selectedSessionId}`)
         if (mounted) setSessionRows(res.data)
       } catch (err) {
-        if (mounted) { setError(getApiErrorMessage(err, 'Không tải được báo cáo buổi học.')); setSessionRows([]) }
+        if (mounted) { handleReportError(err, 'Không tải được báo cáo buổi học.'); setSessionRows([]) }
       }
     }
     load()
@@ -193,7 +201,7 @@ export default function Reports() {
       setMessage('Đã tải tệp báo cáo.')
       setError('')
     } catch (err) {
-      setError(getApiErrorMessage(err, 'Không xuất được báo cáo.'))
+      handleReportError(err, 'Không xuất được báo cáo.')
     } finally {
       setExporting('')
     }
@@ -212,8 +220,12 @@ export default function Reports() {
         </div>
       </div>
 
+      {error && <p className="status-message error" style={{ marginBottom: 16 }}>{error}</p>}
+      {message && <p className="status-message" style={{ marginBottom: 16 }}>{message}</p>}
+
       {/* ── Báo cáo theo lớp ── */}
-      <section className="panel panel-pad" style={{ marginBottom: 24 }}>
+      {user?.role !== 'student' && (
+        <section className="panel panel-pad" style={{ marginBottom: 24 }}>
         <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'center', marginBottom:16 }}>
           <div>
             <h3 style={{ marginTop:0 }}>Đánh giá mô hình</h3>
@@ -304,89 +316,125 @@ export default function Reports() {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile Card Layout cho Đánh giá mô hình */}
+            <div className="mobile-card-list" style={{ marginTop: 14 }}>
+              {modelEvalDetails.map((row, index) => (
+                <div key={`${row.file_name || row.sample_name}-${index}`} className="mobile-card">
+                  <div className="mobile-card-header">
+                    <span className="mobile-card-title" style={{ fontSize: '13px', fontWeight: 700 }}>
+                      {row.file_name || row.sample_name || '-'}
+                    </span>
+                    <span className="badge">{row.result || '-'}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Mẫu thực tế:</span>
+                    <span className="mobile-card-value">{row.actual_student_code || row.sample_code || '-'}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Dự kiến / Dự đoán:</span>
+                    <span className="mobile-card-value">{row.expected_student_code || '-'} / {row.predicted_student_code || '-'}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Trạng thái:</span>
+                    <span className="mobile-card-value">{getDisplayLabel(recognitionStatusLabels, row.status)}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Độ tin cậy:</span>
+                    <span className="mobile-card-value">{formatConf(Number(row.confidence))}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Thời gian:</span>
+                    <span className="mobile-card-value">{row.processing_time_ms == null ? '-' : `${Number(row.processing_time_ms).toFixed(1)} ms`}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </>
         )}
       </section>
+      )}
 
-      <section className="panel panel-pad" style={{ marginBottom: 24 }}>
-        <h3>Báo cáo theo lớp</h3>
+      {user?.role !== 'student' && (
+        <section className="panel panel-pad" style={{ marginBottom: 24 }}>
+          <h3>Báo cáo theo lớp</h3>
 
-        <div className="toolbar" style={{ marginBottom: 16 }}>
-          {/* Dropdown lớp cố định — không tự gõ */}
-          <select
-            value={className}
-            onChange={(e) => setClassName(e.target.value)}
-            style={{ minWidth: 160 }}
-          >
-            <option value="">-- Chọn lớp --</option>
-            {VALID_CLASSES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+          <div className="toolbar" style={{ marginBottom: 16 }}>
+            {/* Dropdown lớp cố định — không tự gõ */}
+            <select
+              value={className}
+              onChange={(e) => setClassName(e.target.value)}
+              style={{ minWidth: 160 }}
+            >
+              <option value="">-- Chọn lớp --</option>
+              {VALID_CLASSES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
 
-          <button onClick={() => loadClassReports()} disabled={loading || !className}>
-            {loading ? 'Đang tải...' : 'Tải báo cáo'}
-          </button>
-          {isAdmin && (
+            <button onClick={() => loadClassReports()} disabled={loading || !className}>
+              {loading ? 'Đang tải...' : 'Tải báo cáo'}
+            </button>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => exportFile('class-excel', `/reports/export/excel/${className}`, `attendance_${className}.xlsx`)}
+                  disabled={!className || exporting === 'class-excel'}
+                >
+                  {exporting === 'class-excel' ? 'Đang xuất...' : 'Excel tổng hợp'}
+                </button>
+                <button
+                  onClick={() => exportFile('class-pdf', `/reports/export/pdf/${className}`, `attendance_${className}.pdf`)}
+                  disabled={!className || exporting === 'class-pdf'}
+                >
+                  {exporting === 'class-pdf' ? 'Đang xuất...' : 'PDF tổng hợp'}
+                </button>
+                <button
+                  onClick={() => exportFile('warning-excel', `/reports/export/excel/warnings/${className}`, `attendance_warnings_${className}.xlsx`)}
+                  disabled={!className || exporting === 'warning-excel'}
+                >
+                  {exporting === 'warning-excel' ? 'Đang xuất...' : 'Excel cảnh báo'}
+                </button>
+              </>
+            )}
+          </div>
+
+
+
+          {!className ? (
+            <div className="empty-state">Chọn lớp ở trên để xem báo cáo.</div>
+          ) : (
             <>
-              <button
-                onClick={() => exportFile('class-excel', `/reports/export/excel/${className}`, `attendance_${className}.xlsx`)}
-                disabled={!className || exporting === 'class-excel'}
-              >
-                {exporting === 'class-excel' ? 'Đang xuất...' : 'Excel tổng hợp'}
-              </button>
-              <button
-                onClick={() => exportFile('class-pdf', `/reports/export/pdf/${className}`, `attendance_${className}.pdf`)}
-                disabled={!className || exporting === 'class-pdf'}
-              >
-                {exporting === 'class-pdf' ? 'Đang xuất...' : 'PDF tổng hợp'}
-              </button>
-              <button
-                onClick={() => exportFile('warning-excel', `/reports/export/excel/warnings/${className}`, `attendance_warnings_${className}.xlsx`)}
-                disabled={!className || exporting === 'warning-excel'}
-              >
-                {exporting === 'warning-excel' ? 'Đang xuất...' : 'Excel cảnh báo'}
-              </button>
+              <div className="grid cards" style={{ marginBottom: 20 }}>
+                <div className="stat-card" style={{ minHeight: 92, borderLeftColor: '#2563eb' }}>
+                  <p>Sinh viên</p>
+                  <strong>{data.length}</strong>
+                </div>
+                <div className="stat-card" style={{ minHeight: 92, borderLeftColor: warnings.length ? '#b91c1c' : '#15803d' }}>
+                  <p>Cảnh báo</p>
+                  <strong>{warnings.length} SV</strong>
+                </div>
+                <div className="stat-card" style={{ minHeight: 92, borderLeftColor: '#7c3aed' }}>
+                  <p>Tổng buổi học</p>
+                  <strong>{data[0]?.total_sessions || 0}</strong>
+                </div>
+              </div>
+
+              <h3>Tỷ lệ chuyên cần — Lớp {className}</h3>
+              <AttendanceChart data={data} />
+
+              <h3 style={{ color: 'var(--danger)', marginTop: 16 }}>
+                Cảnh báo thiếu chuyên cần ({warnings.length} sinh viên)
+              </h3>
+              <WarningTable warnings={warnings} />
             </>
           )}
-        </div>
-
-        {error   && <p className="status-message error">{error}</p>}
-        {message && <p className="status-message">{message}</p>}
-
-        {!className ? (
-          <div className="empty-state">Chọn lớp ở trên để xem báo cáo.</div>
-        ) : (
-          <>
-            <div className="grid cards" style={{ marginBottom: 20 }}>
-              <div className="stat-card" style={{ minHeight: 92, borderLeftColor: '#2563eb' }}>
-                <p>Sinh viên</p>
-                <strong>{data.length}</strong>
-              </div>
-              <div className="stat-card" style={{ minHeight: 92, borderLeftColor: warnings.length ? '#b91c1c' : '#15803d' }}>
-                <p>Cảnh báo</p>
-                <strong>{warnings.length} SV</strong>
-              </div>
-              <div className="stat-card" style={{ minHeight: 92, borderLeftColor: '#7c3aed' }}>
-                <p>Tổng buổi học</p>
-                <strong>{data[0]?.total_sessions || 0}</strong>
-              </div>
-            </div>
-
-            <h3>Tỷ lệ chuyên cần — Lớp {className}</h3>
-            <AttendanceChart data={data} />
-
-            <h3 style={{ color: 'var(--danger)', marginTop: 16 }}>
-              Cảnh báo thiếu chuyên cần ({warnings.length} sinh viên)
-            </h3>
-            <WarningTable warnings={warnings} />
-          </>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* ── Báo cáo theo buổi học ── */}
       <section className="panel panel-pad">
-        <h3>Báo cáo theo buổi học</h3>
+        <h3>{user?.role === 'student' ? 'Lịch sử điểm danh cá nhân' : 'Báo cáo theo buổi học'}</h3>
 
         <div className="toolbar" style={{ marginBottom: 16 }}>
           <select
@@ -438,34 +486,68 @@ export default function Reports() {
         ) : !sessionRows.length ? (
           <div className="empty-state">Chưa có dữ liệu điểm danh cho buổi học này.</div>
         ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  {['Mã SV', 'Họ tên', 'Trạng thái', 'Vào lớp', 'Ra về', 'Độ tin cậy khi vào', 'Độ tin cậy khi ra'].map((h) => (
-                    <th key={h}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {sessionRows.map((row) => (
-                  <tr key={row.student_code}>
-                    <td>{row.student_code}</td>
-                    <td>{row.full_name || '-'}</td>
-                    <td>
-                      <span className={`badge ${row.status === 'absent' ? 'danger' : row.status === 'late' ? 'warning' : 'success'}`}>
-                        {getDisplayLabel(statusLabels, row.status)}
-                      </span>
-                    </td>
-                    <td>{formatDT(row.check_in_at)}</td>
-                    <td>{formatDT(row.check_out_at)}</td>
-                    <td>{formatConf(row.check_in_conf)}</td>
-                    <td>{formatConf(row.check_out_conf)}</td>
+          <>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    {['Mã SV', 'Họ tên', 'Trạng thái', 'Vào lớp', 'Ra về', 'Độ tin cậy khi vào', 'Độ tin cậy khi ra'].map((h) => (
+                      <th key={h}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sessionRows.map((row) => (
+                    <tr key={row.student_code}>
+                      <td>{row.student_code}</td>
+                      <td>{row.full_name || '-'}</td>
+                      <td>
+                        <span className={`badge ${row.status === 'absent' ? 'danger' : row.status === 'late' ? 'warning' : 'success'}`}>
+                          {getDisplayLabel(statusLabels, row.status)}
+                        </span>
+                      </td>
+                      <td>{formatDT(row.check_in_at)}</td>
+                      <td>{formatDT(row.check_out_at)}</td>
+                      <td>{formatConf(row.check_in_conf)}</td>
+                      <td>{formatConf(row.check_out_conf)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card Layout cho Báo cáo theo buổi học */}
+            <div className="mobile-card-list" style={{ marginTop: 14 }}>
+              {sessionRows.map((row) => (
+                <div key={row.student_code} className="mobile-card">
+                  <div className="mobile-card-header">
+                    <span className="mobile-card-title" style={{ fontFamily: 'var(--mono)', fontSize: '13px', fontWeight: 700 }}>
+                      {row.student_code}
+                    </span>
+                    <span className={`badge ${row.status === 'absent' ? 'danger' : row.status === 'late' ? 'warning' : 'success'}`}>
+                      {getDisplayLabel(statusLabels, row.status)}
+                    </span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Họ tên:</span>
+                    <span className="mobile-card-value">{row.full_name || '-'}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Vào lớp:</span>
+                    <span className="mobile-card-value">
+                      {formatDT(row.check_in_at)} {row.check_in_conf ? `(${formatConf(row.check_in_conf)})` : ''}
+                    </span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Ra về:</span>
+                    <span className="mobile-card-value">
+                      {formatDT(row.check_out_at)} {row.check_out_conf ? `(${formatConf(row.check_out_conf)})` : ''}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </section>
     </div>

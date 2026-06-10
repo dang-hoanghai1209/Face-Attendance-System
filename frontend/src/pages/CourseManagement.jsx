@@ -711,7 +711,7 @@ export default function CourseManagement() {
 
       {/* ==================== TAB 3: LỚP HỌC PHẦN ==================== */}
       {activeTab === 'sections' && (
-        <div style={{ display: 'grid', gridTemplateColumns: selectedSecId ? '1fr 340px' : '1fr', gap: 16 }}>
+        <div className={`management-grid ${selectedSecId ? 'active' : ''}`}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="panel panel-pad">
               <h3 style={{ marginTop: 0, marginBottom: 12 }}>{secEditingId ? 'Sửa lớp học phần' : 'Thêm lớp học phần'}</h3>
@@ -878,7 +878,7 @@ export default function CourseManagement() {
 
           {/* Sidebar danh sách sinh viên xếp lớp */}
           {selectedSecId && (
-            <div className="panel panel-pad" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="panel panel-pad enrollment-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h4 style={{ margin: 0 }}>Xếp lớp học phần</h4>
                 <button className="secondary" style={{ minHeight: 28, padding: '4px 8px' }} onClick={() => setSelectedSecId(null)}>

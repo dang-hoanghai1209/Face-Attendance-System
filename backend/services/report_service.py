@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models.attendance import Attendance
+from models.enrollment import Enrollment
 from models.session import Session as ClassSession
 from models.student import Student
 
@@ -89,14 +90,27 @@ def build_class_summary(class_name: str, db: Session):
 def build_session_report(session_id: int, db: Session):
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy buổi học.")
 
-    students = (
-        db.query(Student)
-        .filter(Student.class_name == session.class_name, *official_student_filter())
-        .order_by(Student.full_name.asc())
-        .all()
-    )
+    if session.section_id:
+        students = (
+            db.query(Student)
+            .join(Enrollment, Enrollment.student_id == Student.id)
+            .filter(
+                Enrollment.course_section_id == session.section_id,
+                Enrollment.status == "active",
+                *official_student_filter(),
+            )
+            .order_by(Student.full_name.asc())
+            .all()
+        )
+    else:
+        students = (
+            db.query(Student)
+            .filter(Student.class_name == session.class_name, *official_student_filter())
+            .order_by(Student.full_name.asc())
+            .all()
+        )
     attendance_records = (
         db.query(Attendance)
         .join(Student, Attendance.student_id == Student.id)
@@ -127,16 +141,16 @@ def build_session_report(session_id: int, db: Session):
             }
         )
 
-    class_student_ids = {student.id for student in students}
-    cross_class_student_ids = [
+    expected_student_ids = {student.id for student in students}
+    unexpected_student_ids = [
         student_id
         for student_id in attendance_map
-        if student_id not in class_student_ids
+        if student_id not in expected_student_ids
     ]
-    if cross_class_student_ids:
+    if unexpected_student_ids:
         cross_class_students = (
             db.query(Student)
-            .filter(Student.id.in_(cross_class_student_ids), *official_student_filter())
+            .filter(Student.id.in_(unexpected_student_ids), *official_student_filter())
             .order_by(Student.full_name.asc())
             .all()
         )

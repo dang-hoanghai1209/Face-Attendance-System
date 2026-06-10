@@ -57,8 +57,8 @@ def register_face_samples(
                 rejected_files.append({"filename": upload_name, "reason": f"Phát hiện nhiều khuôn mặt: {face_count}."})
                 continue
             embedding = image_bytes_to_embedding(image_bytes)
-        except Exception as exc:
-            rejected_files.append({"filename": upload_name, "reason": f"Ảnh không hợp lệ: {exc}"})
+        except Exception:
+            rejected_files.append({"filename": upload_name, "reason": "Ảnh không hợp lệ hoặc không thể xử lý."})
             continue
 
         if embedding is None:
@@ -94,7 +94,7 @@ def register_face_samples(
         "rejected_samples": len(rejected_files),
         "rejected_files": rejected_files,
         "total_registered_embeddings": embedding_count(db, student.id),
-        "message": "Đăng ký mẫu khuôn mặt thành công.",
+        "message": "Đăng ký khuôn mặt thành công.",
     }
 
 

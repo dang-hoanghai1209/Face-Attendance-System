@@ -18,7 +18,7 @@ from models.user import User
 
 
 JWT_ALGORITHM = "HS256"
-VALID_ROLES = {"admin", "teacher", "viewer"}
+VALID_ROLES = {"admin", "teacher", "lecturer", "student", "viewer"}
 security = HTTPBearer(auto_error=False)
 BASE_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = BASE_DIR / ".env"
@@ -32,7 +32,7 @@ def _secret_key():
     if not value or value == "replace_me":
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="SECRET_KEY is not configured. Set a strong SECRET_KEY in backend/.env and restart the backend.",
+            detail="Chưa cấu hình SECRET_KEY. Vui lòng đặt SECRET_KEY đủ mạnh trong backend/.env và khởi động lại máy chủ.",
         )
     return value.encode("utf-8")
 
@@ -45,19 +45,19 @@ def _token_expire_minutes():
     if not raw_value:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT_EXPIRE_MINUTES is not configured. Set it in backend/.env.",
+            detail="Chưa cấu hình JWT_EXPIRE_MINUTES trong backend/.env.",
         )
     try:
         value = int(raw_value)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT_EXPIRE_MINUTES must be an integer.",
+            detail="JWT_EXPIRE_MINUTES phải là một số nguyên.",
         ) from exc
     if value <= 0:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="JWT_EXPIRE_MINUTES must be greater than 0.",
+            detail="JWT_EXPIRE_MINUTES phải lớn hơn 0.",
         )
     return value
 
@@ -118,16 +118,16 @@ def decode_access_token(token: str) -> dict:
         expected_signature = hmac.new(_secret_key(), signing_input.encode("ascii"), hashlib.sha256).digest()
         actual_signature = _b64url_decode(signature_b64)
         if not hmac.compare_digest(expected_signature, actual_signature):
-            raise ValueError("Invalid token signature.")
+            raise ValueError("Chữ ký mã xác thực không hợp lệ.")
 
         payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
         if payload.get("exp", 0) < int(datetime.now(timezone.utc).timestamp()):
-            raise ValueError("Token expired.")
+            raise ValueError("Mã xác thực đã hết hạn.")
         return payload
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication token.",
+            detail="Mã xác thực không hợp lệ hoặc đã hết hạn.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
@@ -139,7 +139,7 @@ def get_current_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required.",
+            detail="Vui lòng đăng nhập để tiếp tục.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -149,11 +149,11 @@ def get_current_user(
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User is inactive or no longer exists.",
+            detail="Tài khoản đã bị vô hiệu hóa hoặc không còn tồn tại.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if user.role not in VALID_ROLES:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User role is not allowed.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Vai trò tài khoản không được phép truy cập.")
     return user
 
 
@@ -161,13 +161,13 @@ def require_role(*roles: str):
     allowed_roles = set(roles)
     invalid_roles = allowed_roles - VALID_ROLES
     if invalid_roles:
-        raise ValueError(f"Invalid role(s): {', '.join(sorted(invalid_roles))}")
+        raise ValueError(f"Vai trò không hợp lệ: {', '.join(sorted(invalid_roles))}")
 
     def dependency(current_user: User = Depends(get_current_user)):
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Required role: {', '.join(sorted(allowed_roles))}.",
+                detail=f"Thao tác này yêu cầu một trong các vai trò sau: {', '.join(sorted(allowed_roles))}.",
             )
         return current_user
 

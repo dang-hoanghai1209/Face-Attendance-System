@@ -1,7 +1,8 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,9 @@ class AttendanceCheckIn(BaseModel):
     session_id: int
     confidence: Optional[float] = None
     image_path: Optional[str] = None
+    gps_lat: Optional[float] = None
+    gps_lng: Optional[float] = None
+    gps_accuracy: Optional[float] = None
 
 
 class AttendanceCheckOut(BaseModel):
@@ -35,6 +39,24 @@ class ManualAttendanceCreate(BaseModel):
     audit_id: Optional[int] = None
 
 
+def _checkin_response(db: Session, data: AttendanceCheckIn):
+    try:
+        return attendance_service.record_checkin(
+            db,
+            student_code=data.student_code,
+            session_id=data.session_id,
+            confidence=data.confidence,
+            image_path=data.image_path,
+            gps_lat=data.gps_lat,
+            gps_lng=data.gps_lng,
+            gps_accuracy=data.gps_accuracy,
+        )
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("status"):
+            return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        raise
+
+
 @router.post("/")
 def record_attendance(data: AttendanceCheckIn, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     logger.info(
@@ -43,13 +65,7 @@ def record_attendance(data: AttendanceCheckIn, current_user=Depends(get_current_
         data.student_code,
         current_user.username,
     )
-    return attendance_service.record_checkin(
-        db,
-        student_code=data.student_code,
-        session_id=data.session_id,
-        confidence=data.confidence,
-        image_path=data.image_path,
-    )
+    return _checkin_response(db, data)
 
 
 @router.post("/checkin")
@@ -60,13 +76,7 @@ def record_checkin(data: AttendanceCheckIn, current_user=Depends(get_current_use
         data.student_code,
         current_user.username,
     )
-    return attendance_service.record_checkin(
-        db,
-        student_code=data.student_code,
-        session_id=data.session_id,
-        confidence=data.confidence,
-        image_path=data.image_path,
-    )
+    return _checkin_response(db, data)
 
 
 @router.post("/checkout")

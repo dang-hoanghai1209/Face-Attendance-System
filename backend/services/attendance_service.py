@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
+from math import asin, cos, radians, sin, sqrt
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.attendance import Attendance
+from models.classroom import Classroom
+from models.enrollment import Enrollment
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
@@ -51,6 +54,17 @@ def official_attendance_block_reason(student: Student):
     return None
 
 
+def attendance_error(status_code: int, code: str, message: str, **extra):
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "status": code,
+            "message": message,
+            **extra,
+        },
+    )
+
+
 def _get_student_and_session_base(db: Session, student_code: str, session_id: int):
     student = db.query(Student).filter(Student.student_code == student_code).first()
     if not student:
@@ -70,7 +84,23 @@ def _get_student_and_session_base(db: Session, student_code: str, session_id: in
 
 def get_student_and_session(db: Session, student_code: str, session_id: int):
     student, session = _get_student_and_session_base(db, student_code, session_id)
-    if student.class_name != session.class_name:
+    if session.section_id:
+        enrollment = (
+            db.query(Enrollment)
+            .filter(
+                Enrollment.course_section_id == session.section_id,
+                Enrollment.student_id == student.id,
+                Enrollment.status == "active",
+            )
+            .first()
+        )
+        if not enrollment:
+            attendance_error(
+                403,
+                "not_enrolled",
+                "Bạn không có trong danh sách đăng ký của lớp học phần này.",
+            )
+    elif student.class_name != session.class_name:
         # TODO: Sau này nên kiểm tra bằng danh sách đăng ký môn học/session_students thay vì so sánh class_name.
         raise HTTPException(
             status_code=400,
@@ -162,6 +192,65 @@ def calculate_attendance_status(session: ClassSession, check_in_at: datetime):
     return "present" if check_in_at <= late_threshold else "late"
 
 
+def validate_checkin_window(session: ClassSession, check_in_at: datetime):
+    if not session.start_time:
+        attendance_error(400, "session_time_missing", "Buổi học chưa được cấu hình thời gian bắt đầu.")
+
+    session_start = datetime.combine(session.session_date, session.start_time)
+    attendance_deadline = session_start + timedelta(minutes=LATE_THRESHOLD_MINUTES)
+    if check_in_at < session_start:
+        attendance_error(
+            400,
+            "not_started",
+            "Buổi học chưa bắt đầu. Vui lòng quay lại khi đến giờ học.",
+        )
+    if check_in_at > attendance_deadline:
+        attendance_error(
+            400,
+            "attendance_closed",
+            "Đã quá thời gian điểm danh. Hệ thống chỉ cho phép điểm danh trong 15 phút đầu buổi học.",
+        )
+
+
+def haversine_distance_meters(lat1, lng1, lat2, lng2):
+    earth_radius_meters = 6_371_000
+    lat1_rad, lng1_rad, lat2_rad, lng2_rad = map(radians, [lat1, lng1, lat2, lng2])
+    delta_lat = lat2_rad - lat1_rad
+    delta_lng = lng2_rad - lng1_rad
+    value = sin(delta_lat / 2) ** 2 + cos(lat1_rad) * cos(lat2_rad) * sin(delta_lng / 2) ** 2
+    return 2 * earth_radius_meters * asin(sqrt(value))
+
+
+def validate_gps(db: Session, session: ClassSession, gps_lat=None, gps_lng=None, gps_accuracy=None):
+    if not session.classroom_id:
+        return None
+
+    if gps_lat is None or gps_lng is None:
+        attendance_error(400, "gps_missing", "Vui lòng cho phép truy cập vị trí GPS để điểm danh.")
+
+    classroom = db.query(Classroom).filter(Classroom.id == session.classroom_id).first()
+    if not classroom:
+        attendance_error(400, "classroom_missing", "Buổi học chưa được cấu hình phòng học hợp lệ.")
+
+    distance_meters = haversine_distance_meters(gps_lat, gps_lng, classroom.gps_lat, classroom.gps_lng)
+    if distance_meters > classroom.radius_meters:
+        attendance_error(
+            403,
+            "gps_out_of_range",
+            "Bạn đang ở ngoài phạm vi điểm danh của phòng học.",
+            distance_meters=round(distance_meters, 2),
+            allowed_radius_meters=classroom.radius_meters,
+        )
+
+    return {
+        "gps_lat": gps_lat,
+        "gps_lng": gps_lng,
+        "gps_accuracy": gps_accuracy,
+        "distance_meters": round(distance_meters, 2),
+        "allowed_radius_meters": classroom.radius_meters,
+    }
+
+
 def serialize_record(record: Attendance, student: Student):
     return {
         "record_id": record.id,
@@ -173,7 +262,27 @@ def serialize_record(record: Attendance, student: Student):
         "check_in_conf": record.check_in_conf,
         "check_out_conf": record.check_out_conf,
         "check_in_img": record.check_in_img,
+        "gps_lat": record.gps_lat,
+        "gps_lng": record.gps_lng,
+        "gps_accuracy": record.gps_accuracy,
+        "distance_meters": record.distance_meters,
+        "liveness_passed": record.liveness_passed,
         "note": record.note,
+    }
+
+
+def flatten_checkin_response(status: str, message: str, record: Attendance, student: Student, allowed_radius_meters=None):
+    data = serialize_record(record, student)
+    return {
+        "status": status,
+        "message": message,
+        "student_code": student.student_code,
+        "full_name": student.full_name,
+        "confidence": record.check_in_conf,
+        "distance_meters": record.distance_meters,
+        "allowed_radius_meters": allowed_radius_meters,
+        "check_in_time": record.check_in_at.isoformat() if record.check_in_at else None,
+        "data": data,
     }
 
 
@@ -185,22 +294,42 @@ def get_session_record(db: Session, student_id: int, session_id: int):
     )
 
 
-def already_checked_in_response(record: Attendance, student: Student):
-    return {
-        "status": "success",
-        "message": f"{student.full_name} đã được ghi nhận vào lớp cho buổi học này.",
-        "data": serialize_record(record, student),
-    }
+def allowed_radius_for_session(db: Session, session: ClassSession):
+    if not session or not session.classroom_id:
+        return None
+    classroom = db.query(Classroom).filter(Classroom.id == session.classroom_id).first()
+    return classroom.radius_meters if classroom else None
 
 
-def record_checkin(db: Session, student_code: str, session_id: int, confidence=None, image_path=None):
+def already_checked_in_response(record: Attendance, student: Student, session: ClassSession | None = None, db: Session | None = None):
+    return flatten_checkin_response(
+        "success",
+        "Điểm danh thành công.",
+        record,
+        student,
+        allowed_radius_for_session(db, session) if db is not None and session is not None else None,
+    )
+
+
+def record_checkin(
+    db: Session,
+    student_code: str,
+    session_id: int,
+    confidence=None,
+    image_path=None,
+    gps_lat=None,
+    gps_lng=None,
+    gps_accuracy=None,
+):
     student, session = get_student_and_session(db, student_code, session_id)
     existing = get_session_record(db, student.id, session_id)
 
     if existing:
-        return already_checked_in_response(existing, student)
+        return already_checked_in_response(existing, student, session, db)
 
     check_in_at = now_in_app_timezone()
+    validate_checkin_window(session, check_in_at)
+    gps_data = validate_gps(db, session, gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy=gps_accuracy) or {}
     attendance_status = calculate_attendance_status(session, check_in_at)
 
     record = Attendance(
@@ -209,6 +338,11 @@ def record_checkin(db: Session, student_code: str, session_id: int, confidence=N
         check_in_at=check_in_at,
         check_in_conf=confidence,
         check_in_img=image_path,
+        gps_lat=gps_data.get("gps_lat"),
+        gps_lng=gps_data.get("gps_lng"),
+        gps_accuracy=gps_data.get("gps_accuracy"),
+        distance_meters=gps_data.get("distance_meters"),
+        liveness_passed=False,
         status=attendance_status,
     )
     db.add(record)
@@ -218,15 +352,17 @@ def record_checkin(db: Session, student_code: str, session_id: int, confidence=N
         db.rollback()
         existing = get_session_record(db, student.id, session_id)
         if existing:
-            return already_checked_in_response(existing, student)
+            return already_checked_in_response(existing, student, session, db)
         raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
     db.refresh(record)
 
-    return {
-        "status": "success",
-        "message": f"Đã ghi nhận vào lớp cho {student.full_name}.",
-        "data": serialize_record(record, student),
-    }
+    return flatten_checkin_response(
+        "success",
+        "Điểm danh thành công.",
+        record,
+        student,
+        gps_data.get("allowed_radius_meters"),
+    )
 
 
 def record_checkout(db: Session, student_code: str, session_id: int, confidence=None):

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from database import Base
@@ -17,6 +17,11 @@ class Attendance(Base):
     check_in_conf = Column(Float)
     check_out_conf = Column(Float)
     check_in_img = Column(String(255))
+    gps_lat = Column(Float)
+    gps_lng = Column(Float)
+    gps_accuracy = Column(Float)
+    distance_meters = Column(Float)
+    liveness_passed = Column(Boolean, nullable=True, default=False)
     status = Column(String(20), default="present")
     note = Column(Text)
     created_at = Column(DateTime, server_default=func.now())

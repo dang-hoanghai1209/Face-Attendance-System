@@ -7,8 +7,11 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.attendance import Attendance
+from models.classroom import Classroom
+from models.course_section import CourseSection
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
+from models.subject import Subject
 from services.auth_service import get_current_user, require_admin
 from services.class_service import VALID_CLASS_SET
 
@@ -70,6 +73,20 @@ class SessionUpdate(BaseModel):
         return _validate_class(v)
 
 
+class SessionFromSectionCreate(BaseModel):
+    section_id: int
+    classroom_id: int
+    session_date: date
+    start_time: time
+    end_time: time
+    note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def check_time_range(self):
+        _validate_time_range(self.start_time, self.end_time)
+        return self
+
+
 @router.get("/")
 def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     return db.query(ClassSession).order_by(ClassSession.session_date.desc()).all()
@@ -78,6 +95,40 @@ def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depe
 @router.post("/")
 def create_session(session_data: SessionCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     new_session = ClassSession(**session_data.model_dump())
+    db.add(new_session)
+    db.commit()
+    db.refresh(new_session)
+    return new_session
+
+
+@router.post("/from-section")
+def create_session_from_section(
+    session_data: SessionFromSectionCreate,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    section = db.query(CourseSection).filter(CourseSection.id == session_data.section_id).first()
+    if not section:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lớp học phần.")
+
+    classroom = db.query(Classroom).filter(Classroom.id == session_data.classroom_id).first()
+    if not classroom:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phòng học.")
+    if not classroom.is_active:
+        raise HTTPException(status_code=400, detail="Phòng học này đang bị vô hiệu hóa.")
+
+    subject = db.query(Subject).filter(Subject.id == section.subject_id).first()
+    new_session = ClassSession(
+        subject=subject.subject_name if subject else section.section_code,
+        class_name=section.section_code,
+        section_id=section.id,
+        classroom_id=classroom.id,
+        session_date=session_data.session_date,
+        start_time=session_data.start_time,
+        end_time=session_data.end_time,
+        note=session_data.note,
+        created_by=section.lecturer_name,
+    )
     db.add(new_session)
     db.commit()
     db.refresh(new_session)

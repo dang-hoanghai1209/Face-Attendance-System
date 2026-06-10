@@ -24,7 +24,7 @@ def get_app_timezone(timezone_name=None):
     try:
         return ZoneInfo(resolved_name)
     except ZoneInfoNotFoundError as exc:
-        raise RuntimeError(f"Invalid APP_TIMEZONE: {timezone_name or configured_timezone_name()}") from exc
+        raise RuntimeError(f"APP_TIMEZONE không hợp lệ: {timezone_name or configured_timezone_name()}") from exc
 
 
 def now_in_app_timezone():

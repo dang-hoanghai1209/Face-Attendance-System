@@ -8,7 +8,7 @@ from database import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("role IN ('admin', 'teacher', 'viewer')", name="ck_users_role"),
+        CheckConstraint("role IN ('admin', 'teacher', 'lecturer', 'student', 'viewer')", name="ck_users_role"),
     )
 
     id = Column(Integer, primary_key=True, index=True)

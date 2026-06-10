@@ -8,9 +8,13 @@ os.environ.setdefault("APP_TIMEZONE", "Asia/Nha_Trang")
 
 from database import Base, SessionLocal, engine
 from models.attendance import Attendance
+from models.classroom import Classroom
+from models.course_section import CourseSection
+from models.enrollment import Enrollment
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
+from models.subject import Subject
 from services import attendance_service, report_service
 from services import timezone_service
 
@@ -62,6 +66,43 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.db.refresh(session)
         return session
 
+    def add_section_session(self):
+        classroom = Classroom(
+            name="Room 101",
+            gps_lat=12.238912,
+            gps_lng=109.196748,
+            radius_meters=20,
+            is_active=True,
+        )
+        subject = Subject(subject_code="MVP101", subject_name="MVP Subject")
+        self.db.add_all([classroom, subject])
+        self.db.commit()
+        self.db.refresh(classroom)
+        self.db.refresh(subject)
+
+        section = CourseSection(
+            section_code="MVP101-64CNTT-2026",
+            subject_id=subject.id,
+            status="open",
+        )
+        self.db.add(section)
+        self.db.commit()
+        self.db.refresh(section)
+
+        session = ClassSession(
+            subject=subject.subject_name,
+            class_name=section.section_code,
+            section_id=section.id,
+            classroom_id=classroom.id,
+            session_date=date(2026, 5, 30),
+            start_time=time(7, 30),
+            end_time=time(9, 30),
+        )
+        self.db.add(session)
+        self.db.commit()
+        self.db.refresh(session)
+        return section, classroom, session
+
     def patch_now(self, value):
         self.original_now = attendance_service.now_in_app_timezone
         attendance_service.now_in_app_timezone = lambda: value
@@ -97,9 +138,90 @@ class AttendanceReportServiceTests(unittest.TestCase):
         session = self.add_session()
         self.patch_now(datetime(2026, 5, 30, 7, 46))
 
-        response = attendance_service.record_checkin(self.db, "63133870", session.id)
+        with self.assertRaises(Exception) as ctx:
+            attendance_service.record_checkin(self.db, "63133870", session.id)
 
-        self.assertEqual(response["data"]["status"], "late")
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["status"], "attendance_closed")
+        self.assertIn("Đã quá thời gian điểm danh", ctx.exception.detail["message"])
+
+    def test_checkin_rejects_before_session_start(self):
+        self.add_student()
+        session = self.add_session()
+        self.patch_now(datetime(2026, 5, 30, 7, 29))
+
+        with self.assertRaises(Exception) as ctx:
+            attendance_service.record_checkin(self.db, "63133870", session.id)
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail["status"], "not_started")
+        self.assertIn("Buổi học chưa bắt đầu", ctx.exception.detail["message"])
+
+    def test_section_session_requires_active_enrollment(self):
+        self.add_student()
+        _section, classroom, session = self.add_section_session()
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        with self.assertRaises(Exception) as ctx:
+            attendance_service.record_checkin(
+                self.db,
+                "63133870",
+                session.id,
+                gps_lat=classroom.gps_lat,
+                gps_lng=classroom.gps_lng,
+            )
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail["status"], "not_enrolled")
+        self.assertEqual(ctx.exception.detail["message"], "Bạn không có trong danh sách đăng ký của lớp học phần này.")
+
+    def test_section_session_saves_gps_when_valid(self):
+        student = self.add_student()
+        section, classroom, session = self.add_section_session()
+        self.db.add(Enrollment(course_section_id=section.id, student_id=student.id, status="active"))
+        self.db.commit()
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.91,
+            gps_lat=classroom.gps_lat,
+            gps_lng=classroom.gps_lng,
+            gps_accuracy=5.5,
+        )
+
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(response["message"], "Điểm danh thành công.")
+        self.assertEqual(response["student_code"], "63133870")
+        self.assertEqual(response["full_name"], "Nguyen Van A")
+        self.assertEqual(response["confidence"], 0.91)
+        self.assertEqual(response["data"]["gps_accuracy"], 5.5)
+        self.assertEqual(response["data"]["distance_meters"], 0.0)
+        self.assertEqual(response["distance_meters"], 0.0)
+        self.assertEqual(response["allowed_radius_meters"], classroom.radius_meters)
+        self.assertIsNotNone(response["check_in_time"])
+
+    def test_section_session_rejects_gps_out_of_range(self):
+        student = self.add_student()
+        section, _classroom, session = self.add_section_session()
+        self.db.add(Enrollment(course_section_id=section.id, student_id=student.id, status="active"))
+        self.db.commit()
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        with self.assertRaises(Exception) as ctx:
+            attendance_service.record_checkin(
+                self.db,
+                "63133870",
+                session.id,
+                gps_lat=13.0,
+                gps_lng=109.0,
+            )
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail["status"], "gps_out_of_range")
+        self.assertEqual(ctx.exception.detail["message"], "Bạn đang ở ngoài phạm vi điểm danh của phòng học.")
 
     def test_checkout_updates_existing_record(self):
         self.add_student()

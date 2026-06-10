@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,11 +8,18 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.attendance import Attendance
+from models.classroom import Classroom
+from models.course_section import CourseSection
+from models.enrollment import Enrollment
 from models.face_embedding import FaceEmbedding
 from models.recognition_attempt import RecognitionAttempt
+from models.session import Session as ClassSession
 from models.student import Student
+from models.subject import Subject
+from services.attendance_service import LATE_THRESHOLD_MINUTES
 from services.auth_service import get_current_user, require_admin
 from services.class_service import VALID_CLASS_SET, student_code_matches_class
+from services.timezone_service import now_in_app_timezone
 
 
 router = APIRouter(prefix="/students", tags=["Students"])
@@ -52,7 +60,7 @@ def _ensure_code_matches_class(student_code: Optional[str], class_name: Optional
     if not student_code_matches_class(student_code, class_name):
         raise HTTPException(
             status_code=400,
-            detail=f"Mã sinh viên {student_code} không có khớp với lớp {class_name}.",
+            detail=f"Mã sinh viên {student_code} không khớp với lớp {class_name}.",
         )
 
 
@@ -60,7 +68,7 @@ def _validate_data_source(v: Optional[str]) -> str:
     value = (v or "real").strip().lower()
     if value not in VALID_DATA_SOURCES:
         raise ValueError(
-            f"Nguồn dữ liệu phải là một trong những dữ liệu sau: {', '.join(sorted(VALID_DATA_SOURCES))}."
+            f"Nguồn dữ liệu không hợp lệ. Vui lòng chọn một trong các giá trị sau: {', '.join(sorted(VALID_DATA_SOURCES))}."
         )
     return value
 
@@ -71,7 +79,7 @@ def _validate_registration_method(v: Optional[str]) -> Optional[str]:
     value = v.strip().lower()
     if value not in VALID_REGISTRATION_METHODS:
         raise ValueError(
-            f"Nguồn dữ liệu phải là một trong các giá trị sau: {', '.join(sorted(VALID_REGISTRATION_METHODS))}."
+            f"Phương thức đăng ký không hợp lệ. Vui lòng chọn một trong các giá trị sau: {', '.join(sorted(VALID_REGISTRATION_METHODS))}."
         )
     return value
 
@@ -139,6 +147,68 @@ class StudentUpdate(BaseModel):
     @classmethod
     def check_registration_method(cls, v):
         return _validate_registration_method(v)
+
+
+def _format_time(value):
+    return value.strftime("%H:%M") if value else None
+
+
+def _mobile_session_status(session: ClassSession, now_value: datetime):
+    if not session.start_time:
+        return "closed", None
+
+    session_start = datetime.combine(session.session_date, session.start_time)
+    attendance_deadline = session_start + timedelta(minutes=LATE_THRESHOLD_MINUTES)
+    if now_value < session_start:
+        return "not_started", attendance_deadline
+    if now_value <= attendance_deadline:
+        return "open_for_attendance", attendance_deadline
+    return "closed", attendance_deadline
+
+
+@router.get("/me/active-sessions")
+def get_my_active_sessions(student_id: int, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Không tìm thấy sinh viên.")
+
+    now_value = now_in_app_timezone()
+    rows = (
+        db.query(ClassSession, CourseSection, Subject, Classroom)
+        .join(CourseSection, ClassSession.section_id == CourseSection.id)
+        .join(Enrollment, Enrollment.course_section_id == CourseSection.id)
+        .join(Subject, CourseSection.subject_id == Subject.id)
+        .outerjoin(Classroom, ClassSession.classroom_id == Classroom.id)
+        .filter(
+            Enrollment.student_id == student_id,
+            Enrollment.status == "active",
+        )
+        .order_by(ClassSession.session_date.asc(), ClassSession.start_time.asc())
+        .all()
+    )
+
+    items = []
+    for session, section, subject, classroom in rows:
+        status, attendance_deadline = _mobile_session_status(session, now_value)
+        items.append(
+            {
+                "session_id": session.id,
+                "section_id": section.id,
+                "subject_name": subject.subject_name,
+                "section_code": section.section_code,
+                "classroom_id": classroom.id if classroom else None,
+                "classroom_name": classroom.name if classroom else None,
+                "classroom_gps_lat": classroom.gps_lat if classroom else None,
+                "classroom_gps_lng": classroom.gps_lng if classroom else None,
+                "radius_meters": classroom.radius_meters if classroom else None,
+                "session_date": session.session_date.isoformat() if session.session_date else None,
+                "start_time": _format_time(session.start_time),
+                "end_time": _format_time(session.end_time),
+                "attendance_deadline": _format_time(attendance_deadline),
+                "status": status,
+            }
+        )
+    return items
 
 
 @router.get("/")

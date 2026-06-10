@@ -28,6 +28,21 @@ def _sync_attendance_columns(connection, table_name, columns):
     if "check_in_img" not in columns:
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN check_in_img VARCHAR(255)"))
         columns.add("check_in_img")
+    if "gps_lat" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN gps_lat FLOAT"))
+        columns.add("gps_lat")
+    if "gps_lng" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN gps_lng FLOAT"))
+        columns.add("gps_lng")
+    if "gps_accuracy" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN gps_accuracy FLOAT"))
+        columns.add("gps_accuracy")
+    if "distance_meters" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN distance_meters FLOAT"))
+        columns.add("distance_meters")
+    if "liveness_passed" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN liveness_passed BOOLEAN DEFAULT FALSE"))
+        columns.add("liveness_passed")
     if "note" not in columns:
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN note TEXT"))
         columns.add("note")
@@ -220,12 +235,9 @@ def _sync_user_columns(connection, columns):
             """
             DO $$
             BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'ck_users_role'
-                ) THEN
-                    ALTER TABLE users
-                    ADD CONSTRAINT ck_users_role CHECK (role IN ('admin', 'teacher', 'viewer'));
-                END IF;
+                ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_role;
+                ALTER TABLE users
+                ADD CONSTRAINT ck_users_role CHECK (role IN ('admin', 'teacher', 'lecturer', 'student', 'viewer'));
             END $$;
             """
         )
@@ -291,6 +303,12 @@ def sync_schema(engine):
             if "created_at" not in columns:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN created_at TIMESTAMP"))
                 connection.execute(text("UPDATE sessions SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+            if "section_id" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN section_id INTEGER"))
+            if "classroom_id" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN classroom_id INTEGER"))
+            if "note" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN note TEXT"))
 
             connection.execute(text("UPDATE sessions SET start_time = '07:00:00' WHERE start_time IS NULL"))
             connection.execute(text("UPDATE sessions SET end_time = '09:00:00' WHERE end_time IS NULL"))

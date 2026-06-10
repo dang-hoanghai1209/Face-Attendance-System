@@ -24,11 +24,15 @@ from face_service import (
     match_embedding,
 )
 from models.recognition_attempt import RecognitionAttempt  # noqa: F401
+from models.classroom import Classroom  # noqa: F401
+from models.course_section import CourseSection  # noqa: F401
+from models.enrollment import Enrollment  # noqa: F401
 from models.session import Session as ClassSession
 from models.student import Student
+from models.subject import Subject  # noqa: F401
 from models.user import User  # noqa: F401
 from schema_sync import sync_schema
-from routes import attendance, auth, faces, reports, sessions, students
+from routes import attendance, auth, classrooms, course_sections, enrollments, faces, reports, sessions, students, subjects
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
 from services.attendance_service import (
@@ -76,7 +80,7 @@ async def startup_event():
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "message": "Face attendance backend is ready."}
+    return {"status": "online", "message": "Máy chủ hệ thống điểm danh khuôn mặt đã sẵn sàng."}
 
 
 @app.get("/health")
@@ -216,7 +220,7 @@ def recognize_face(
         raise
     except Exception as exc:
         logger.exception("recognize request crashed: session_id=%s filename=%s", session_id, file.filename)
-        raise HTTPException(status_code=500, detail="Recognition failed on the backend.") from exc
+        raise HTTPException(status_code=500, detail="Máy chủ không thể hoàn tất quá trình nhận diện khuôn mặt.") from exc
 
 
 @app.post("/recognize/model-test")
@@ -305,11 +309,14 @@ def _recognize_uploaded_face(
                     session_id=session_id,
                     status="invalid_image",
                     image_path=capture_path,
-                    message=f"Invalid image: {exc}",
+                    message=f"Ảnh không hợp lệ: {exc}",
                 )
             finally:
                 db.close()
-        raise HTTPException(status_code=400, detail=f"Không xử lý được ảnh: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="Không xử lý được ảnh. Vui lòng kiểm tra định dạng và chất lượng ảnh.",
+        ) from exc
 
     if embedding is None:
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
@@ -323,7 +330,7 @@ def _recognize_uploaded_face(
                     confidence=-1.0,
                     status="no_face",
                     image_path=capture_path,
-                    message="No face detected in the image.",
+                    message="Không phát hiện khuôn mặt trong ảnh.",
                 )
                 audit_id = attempt.id if attempt else None
             finally:
@@ -375,9 +382,9 @@ def _recognize_uploaded_face(
         if official_mode and not official_warning:
             official_warning, official_warning_code = _session_membership_warning(student_data, session)
         message = {
-            "success": "Face matched successfully.",
-            "uncertain": "Face detected but requires manual confirmation.",
-            "unknown": "Face detected but not recognized.",
+            "success": "Nhận diện khuôn mặt thành công.",
+            "uncertain": "Đã phát hiện khuôn mặt nhưng chưa đủ độ tin cậy. Vui lòng xác nhận thủ công.",
+            "unknown": "Đã phát hiện khuôn mặt nhưng không nhận diện được sinh viên.",
         }[recognition_status]
         if official_warning:
             message = official_warning
@@ -427,6 +434,10 @@ def _recognize_uploaded_face(
 
 app.include_router(auth.router)
 app.include_router(students.router)
+app.include_router(classrooms.router)
+app.include_router(subjects.router)
+app.include_router(course_sections.router)
+app.include_router(enrollments.router)
 app.include_router(attendance.router)
 app.include_router(sessions.router)
 app.include_router(reports.router)

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import api from '../../api/axios.js'
 import { VALID_CLASSES, classMatchesStudentCode } from '../constants/classes.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
+import { dataSourceLabels } from '../utils/displayLabels.js'
 
 const CODE_RE = /^(63|64)\d{6}$/
-const SOURCE_LABELS = { real: 'Thật', kaggle: 'Kaggle', demo: 'Demo' }
+const SOURCE_LABELS = dataSourceLabels
 const SOURCE_BADGES = { real: 'success', kaggle: 'warning', demo: 'danger' }
 
 const emptyForm = { student_code: '', full_name: '', class_name: '' }
@@ -66,7 +68,7 @@ export default function Students() {
       setStudents(r.data)
     } catch (e) {
       if (!isMounted()) return
-      notify(e.response?.data?.detail || e.message, 'error')
+      notify(getApiErrorMessage(e, 'Không tải được danh sách sinh viên.'), 'error')
     }
   }, [notify])
 
@@ -132,7 +134,7 @@ export default function Students() {
       resetForm()
       await fetchStudents()
     } catch (e) {
-      notify(e.response?.data?.detail || e.message, 'error')
+      notify(getApiErrorMessage(e, 'Không lưu được thông tin sinh viên.'), 'error')
     } finally {
       setLoading(false)
     }
@@ -164,7 +166,7 @@ export default function Students() {
       setDeleteTarget(null)
       await fetchStudents()
     } catch (e) {
-      notify(e.response?.data?.detail || e.message, 'error')
+      notify(getApiErrorMessage(e, 'Không xóa được sinh viên.'), 'error')
     } finally {
       setLoading(false)
     }
@@ -176,9 +178,9 @@ export default function Students() {
         <div>
           <p className="eyebrow">Quản lý</p>
           <h1 className="page-title">Sinh viên</h1>
-          <p className="page-subtitle">{students.length} sinh viên - {VALID_CLASSES.length} lớp - Validation mã 63/64 + 6 số</p>
+          <p className="page-subtitle">{students.length} sinh viên - {VALID_CLASSES.length} lớp - Mã sinh viên gồm tiền tố 63/64 và 6 chữ số</p>
         </div>
-        <button onClick={fetchStudents} className="secondary" disabled={loading}>Tải lại</button>
+        <button onClick={fetchStudents} className="secondary" disabled={loading}>Tải lại dữ liệu</button>
       </div>
 
       <div className="panel panel-pad" style={{ marginBottom:14 }}>
@@ -197,7 +199,7 @@ export default function Students() {
           </Field>
           <Field label="Họ tên" error={errors.full_name}>
             <input
-              placeholder="Họ Tên"
+              placeholder="Họ và tên"
               value={form.full_name}
               onChange={(e) => handleChange('full_name', e.target.value)}
               style={errors.full_name ? { borderColor:'var(--red)' } : {}}
@@ -231,9 +233,9 @@ export default function Students() {
           </select>
           <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} style={{ minWidth:130 }}>
             <option value="all">Tất cả nguồn</option>
-            <option value="real">Thật</option>
-            <option value="kaggle">Kaggle</option>
-            <option value="demo">Demo</option>
+            <option value="real">Dữ liệu thật</option>
+            <option value="kaggle">Dữ liệu kiểm thử Kaggle</option>
+            <option value="demo">Dữ liệu minh họa</option>
           </select>
           <select value={faceFilter} onChange={(e) => setFaceFilter(e.target.value)} style={{ minWidth:160 }}>
             <option value="all">Tất cả khuôn mặt</option>

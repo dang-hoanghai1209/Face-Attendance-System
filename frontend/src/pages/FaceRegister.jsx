@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import api from '../../api/axios.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 const MIN_SAMPLES        = 5
 const RECOMMENDED_SAMPLES = 8
@@ -64,7 +65,7 @@ export default function FaceRegister() {
       setStudents(officialStudents)
       if(officialStudents.length) setSelectedCode(c=>c||officialStudents[0].student_code)
     })
-      .catch(e => { if(m) setMessage(`Không tải được sinh viên: ${e.response?.data?.detail||e.message}`) })
+      .catch(e => { if(m) setMessage(getApiErrorMessage(e, 'Không tải được danh sách sinh viên.')) })
     return () => { m=false }
   }, [])
 
@@ -111,7 +112,7 @@ export default function FaceRegister() {
       const ms = await navigator.mediaDevices.getUserMedia({ video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'} })
       streamRef.current=ms; if(videoRef.current) videoRef.current.srcObject=ms
       setStream(ms); setMessage('Camera đã sẵn sàng.')
-    } catch(e) { setMessage(`Không mở được camera: ${e.message}`) }
+    } catch { setMessage('Không mở được camera. Vui lòng kiểm tra quyền truy cập camera và thử lại.') }
   }
 
   const captureSample = useCallback(({requireQuality=false,source='thủ công'}={}) => {
@@ -155,7 +156,7 @@ export default function FaceRegister() {
       clearSamples('')
       setRegisteredCount(r.data.total_registered_embeddings); setFaceStatus('registered')
       setMessage(`✅ Đăng ký thành công. Hợp lệ: ${r.data.accepted_samples}, loại: ${r.data.rejected_samples}.`)
-    } catch(e) { setMessage(e.response?.data?.detail||e.message) }
+    } catch(e) { setMessage(getApiErrorMessage(e, 'Không đăng ký được khuôn mặt.')) }
     finally { setSaving(false) }
   }
 
@@ -167,7 +168,7 @@ export default function FaceRegister() {
         <div>
           <p className="eyebrow">Nhận diện AI</p>
           <h1 className="page-title">Đăng ký khuôn mặt</h1>
-          <p className="page-subtitle">MTCNN phát hiện · FaceNet 512D · Mean Embedding lưu DB</p>
+          <p className="page-subtitle">MTCNN phát hiện khuôn mặt · FaceNet tạo đặc trưng 512 chiều · Lưu đặc trưng trung bình vào cơ sở dữ liệu</p>
         </div>
       </div>
 
@@ -184,7 +185,7 @@ export default function FaceRegister() {
           </div>
           {[
             {label:'Trạng thái',  val: faceStatus==='registered'?'Đã đăng ký':'Chưa đăng ký', ok: faceStatus==='registered'},
-            {label:'Mẫu lưu DB',  val: registeredCount, ok: registeredCount>0},
+            {label:'Mẫu đã lưu',  val: registeredCount, ok: registeredCount>0},
             {label:'Mẫu chờ ghi', val: `${samples.length}/${MIN_SAMPLES}`, ok: samples.length>=MIN_SAMPLES},
           ].map(c=>(
             <div key={c.label} style={{background:'var(--card)',border:'1px solid var(--bdr)',borderRadius:'var(--r)',padding:'10px 16px',textAlign:'center',minWidth:120,position:'relative',overflow:'hidden'}}>

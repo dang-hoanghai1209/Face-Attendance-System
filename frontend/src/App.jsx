@@ -5,19 +5,23 @@ import './App.css'
 import { AuthProvider } from './auth/AuthContext.jsx'
 import { useAuth } from './auth/auth-context.js'
 import Sidebar from './components/Navbar'
+import BottomNavigation from './components/BottomNavigation'
 import Attendance from './pages/Attendance'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import Students from './pages/Students'
+import { getDisplayLabel, roleLabels } from './utils/displayLabels.js'
 
 const FaceRegister = lazy(() => import('./pages/FaceRegister'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Sessions = lazy(() => import('./pages/Sessions'))
+const CourseManagement = lazy(() => import('./pages/CourseManagement'))
 
 const BREADCRUMBS = {
-  '/': ['Tổng quan', 'Dashboard'],
+  '/': ['Tổng quan', 'Bảng điều khiển'],
   '/students': ['Quản lý', 'Sinh viên'],
   '/sessions': ['Quản lý', 'Buổi học'],
+  '/course-management': ['Quản lý', 'Học phần'],
   '/faces/register': ['Nhận diện AI', 'Đăng ký khuôn mặt'],
   '/attendance': ['Nhận diện AI', 'Điểm danh'],
   '/reports': ['Phân tích', 'Báo cáo'],
@@ -36,7 +40,9 @@ function Topbar() {
         <b>{current}</b>
       </div>
       <div className="topbar-right">
-        <div className="topbar-pill">{user?.username || 'user'} · {user?.role || 'user'}</div>
+        <div className="topbar-pill">
+          {user?.username || 'Người dùng'} · {getDisplayLabel(roleLabels, user?.role, 'Người dùng')}
+        </div>
         <button className="secondary" onClick={logout} style={{ minHeight:34, padding:'6px 12px' }}>
           Đăng xuất
         </button>
@@ -47,6 +53,7 @@ function Topbar() {
 
 function ProtectedShell() {
   const { checking, isAuthenticated, user } = useAuth()
+  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
 
   if (checking) {
     return (
@@ -69,6 +76,7 @@ function ProtectedShell() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/students" element={user?.role === 'admin' ? <Students /> : <Navigate to="/" replace />} />
               <Route path="/sessions" element={user?.role === 'admin' ? <Sessions /> : <Navigate to="/" replace />} />
+              <Route path="/course-management" element={isLecturerOrAdmin ? <CourseManagement /> : <Navigate to="/" replace />} />
               <Route path="/faces/register" element={user?.role === 'admin' ? <FaceRegister /> : <Navigate to="/" replace />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/reports" element={<Reports />} />
@@ -77,6 +85,7 @@ function ProtectedShell() {
           </Suspense>
         </div>
       </main>
+      <BottomNavigation />
     </div>
   )
 }

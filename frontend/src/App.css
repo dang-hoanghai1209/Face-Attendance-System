@@ -426,3 +426,151 @@ textarea { min-height: 90px; resize: vertical; }
   .grid.two { grid-template-columns: 1fr; }
   .page-content { padding: 16px; }
 }
+
+@media (max-width: 768px) {
+  .app-shell {
+    flex-direction: column;
+  }
+  .sidebar {
+    display: none !important;
+  }
+  .topbar {
+    padding: 0 16px;
+    height: 56px;
+  }
+  .topbar-right {
+    gap: 8px;
+  }
+  .topbar-pill {
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .page-content {
+    padding: 12px;
+    margin-bottom: 76px; /* Chừa chỗ cho bottom navigation */
+  }
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .page-header button {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  /* Touch target - Tăng chiều cao của input/select/button trên mobile */
+  button, input, select, textarea, .form-grid input, .form-grid select {
+    min-height: 48px !important;
+    font-size: 14px !important;
+  }
+  
+  /* Cấu trúc card thay cho table trên mobile */
+  .table-wrap {
+    border: none;
+    overflow-x: visible;
+  }
+  .data-table {
+    display: none !important; /* Ẩn table truyền thống trên mobile */
+  }
+  
+  .mobile-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .mobile-card {
+    background: var(--card);
+    border: 1px solid var(--bdr);
+    border-radius: var(--r);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .mobile-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--bdr);
+    padding-bottom: 8px;
+  }
+  .mobile-card-title {
+    font-weight: 700;
+    color: var(--white);
+    font-size: 14px;
+  }
+  .mobile-card-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+  .mobile-card-label {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .mobile-card-value {
+    color: var(--white2);
+    font-weight: 600;
+  }
+  .mobile-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .mobile-card-actions button {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* ── Bottom Navigation cho Mobile ── */
+.bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    background: rgba(10, 20, 32, 0.95);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--bdr2);
+    z-index: 100;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0 4px;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  }
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    height: 100%;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 600;
+    gap: 4px;
+    transition: color 0.15s;
+  }
+  .bottom-nav-item.active {
+    color: var(--teal);
+  }
+  .bottom-nav-icon {
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    width: 24px;
+  }
+}

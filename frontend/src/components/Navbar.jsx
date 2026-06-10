@@ -11,6 +11,7 @@ const NAV = [
       { to: '/', label: 'Tổng quan' },
       { to: '/students', label: 'Sinh viên', adminOnly: true },
       { to: '/sessions', label: 'Buổi học', adminOnly: true },
+      { to: '/course-management', label: 'Quản lý học phần', lecturerOrAdminOnly: true },
     ],
   },
   {
@@ -31,6 +32,7 @@ const NAV = [
 export default function Sidebar() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
 
   return (
     <aside className="sidebar">
@@ -38,12 +40,16 @@ export default function Sidebar() {
         <img className="brand-logo" src={NTU_LOGO_SRC} alt="Logo Đại học Nha Trang" />
         <div className="logo-text">
           <strong>Hệ thống điểm danh</strong>
-          <span>Project chuyên đề</span>
+          <span>Đề tài chuyên đề</span>
         </div>
       </div>
 
       {NAV.map((section) => {
-        const items = section.items.filter((item) => !item.adminOnly || isAdmin)
+        const items = section.items.filter((item) => {
+          if (item.adminOnly && !isAdmin) return false
+          if (item.lecturerOrAdminOnly && !isLecturerOrAdmin) return false
+          return true
+        })
         if (!items.length) return null
 
         return (
@@ -67,8 +73,8 @@ export default function Sidebar() {
         <div className="sys-status">
           <div className="status-dot" />
           <div>
-            <div className="status-txt">Hệ thống online</div>
-            <div className="status-sub">Face Attendance NTU</div>
+            <div className="status-txt">Hệ thống đang hoạt động</div>
+            <div className="status-sub">Điểm danh khuôn mặt NTU</div>
           </div>
         </div>
       </div>

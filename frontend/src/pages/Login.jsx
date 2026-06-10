@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 
 import { useAuth } from '../auth/auth-context.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 const NTU_LOGO_SRC = '/logo-dai-hoc-nha-trang.jpg'
 
@@ -21,7 +22,7 @@ export default function Login() {
     try {
       await login(username.trim(), password)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Không đăng nhập được.')
+      setError(getApiErrorMessage(err, 'Không đăng nhập được.'))
     } finally {
       setLoading(false)
     }
@@ -48,7 +49,7 @@ export default function Login() {
             style={{ width:58, height:58, objectFit:'contain', flexShrink:0 }}
           />
           <div>
-            <p style={{ margin:0, color:'#0f766e', fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'.08em' }}>Face Attendance</p>
+            <p style={{ margin:0, color:'#0f766e', fontSize:12, fontWeight:800, textTransform:'uppercase', letterSpacing:'.08em' }}>Điểm danh khuôn mặt</p>
             <h1 style={{ margin:'6px 0 4px', fontSize:24, lineHeight:1.2 }}>Đăng nhập hệ thống</h1>
             <p style={{ margin:0, color:'#6b7280', fontSize:13 }}>Cần tài khoản để xem hoặc sửa dữ liệu điểm danh.</p>
           </div>

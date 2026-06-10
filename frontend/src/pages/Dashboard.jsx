@@ -4,6 +4,7 @@ import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recha
 
 import api from '../../api/axios.js'
 import { VALID_CLASSES } from '../constants/classes.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 const fallbackStats = {
   total_students: 0, registered_faces: 0, unregistered_faces: 0,
@@ -13,9 +14,9 @@ const pieLabels = { Present: 'Có mặt', Absent: 'Vắng' }
 const quickActions = [
   { to: '/students',       icon: '👤', label: 'Sinh viên',            desc: 'Thêm và quản lý danh sách sinh viên theo lớp.' },
   { to: '/sessions',       icon: '📅', label: 'Buổi học',             desc: 'Tạo lịch học theo môn, lớp và khung giờ.' },
-  { to: '/faces/register', icon: '📸', label: 'Đăng ký khuôn mặt',   desc: 'Chụp mẫu camera và lưu mean embedding 512D.' },
-  { to: '/attendance',     icon: '✅', label: 'Điểm danh',            desc: 'Nhận diện check-in / check-out hoặc thủ công.' },
-  { to: '/reports',        icon: '📊', label: 'Báo cáo',              desc: 'Xem cảnh báo chuyên cần, xuất Excel / PDF.' },
+  { to: '/faces/register', icon: '📸', label: 'Đăng ký khuôn mặt',   desc: 'Chụp mẫu bằng camera và lưu đặc trưng khuôn mặt.' },
+  { to: '/attendance',     icon: '✅', label: 'Điểm danh',            desc: 'Nhận diện để ghi nhận vào lớp, ra về hoặc điểm danh thủ công.' },
+  { to: '/reports',        icon: '📊', label: 'Báo cáo',              desc: 'Xem cảnh báo chuyên cần và xuất báo cáo Excel hoặc PDF.' },
 ]
 const fmt = (v) => `${Math.round((v || 0) * 100)}%`
 
@@ -32,7 +33,7 @@ export default function Dashboard() {
       setStats(res.data); setError('')
     } catch (e) {
       if (!isMounted()) return
-      setError(e.response?.data?.detail || e.message)
+      setError(getApiErrorMessage(e, 'Không tải được dữ liệu tổng quan.'))
     } finally {
       if (isMounted()) setLoading(false)
     }
@@ -67,7 +68,7 @@ export default function Dashboard() {
         <div>
           <p className="eyebrow">Hệ thống điểm danh khuôn mặt</p>
           <h1 className="page-title">Tổng quan hệ thống</h1>
-          <p className="page-subtitle">Học kỳ 2 · 2024–2025 · MTCNN + FaceNet + Cosine Similarity</p>
+          <p className="page-subtitle">Học kỳ 2 · 2024–2025 · MTCNN + FaceNet + độ tương đồng cosine</p>
         </div>
         <button className="secondary" onClick={() => load()} disabled={loading}>
           {loading ? 'Đang tải...' : '🔄 Tải lại'}
@@ -92,7 +93,7 @@ export default function Dashboard() {
         <div className="panel panel-pad">
           <h3 style={{ marginTop:0, marginBottom:14, fontSize:14 }}>Tỷ lệ chuyên cần toàn hệ thống</h3>
           {!hasData
-            ? <div className="empty-state">Chưa có dữ liệu điểm danh. Tạo buổi học và ghi nhận check-in để biểu đồ có số liệu.</div>
+            ? <div className="empty-state">Chưa có dữ liệu điểm danh. Hãy tạo buổi học và ghi nhận vào lớp để biểu đồ có số liệu.</div>
             : <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
                   <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={95} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`}>
@@ -112,7 +113,7 @@ export default function Dashboard() {
           {[
             { type:'danger', icon:'🚨', title:`${stats.warning_count} SV dưới ngưỡng chuyên cần`, sub:'Xem báo cáo cảnh báo để liên hệ sinh viên.' },
             { type:'warning', icon:'⚠️', title:`${stats.unregistered_faces} SV chưa đăng ký khuôn mặt`, sub:'Không thể điểm danh tự động — cần đăng ký trước.' },
-            { type:'info', icon:'💡', title:'Luồng demo gợi ý', sub:'Sinh viên → Buổi học → Khuôn mặt → Điểm danh → Báo cáo.' },
+            { type:'info', icon:'💡', title:'Quy trình minh họa', sub:'Sinh viên → Buổi học → Khuôn mặt → Điểm danh → Báo cáo.' },
           ].map(a=>(
             <div key={a.title} className="panel panel-pad" style={{
               background: a.type==='danger' ? 'rgba(244,63,94,.06)' : a.type==='warning' ? 'rgba(245,158,11,.06)' : 'rgba(59,130,246,.06)',

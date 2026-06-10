@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import api from '../../api/axios.js'
 import { VALID_CLASSES } from '../constants/classes.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
 
 // ------------------------------------------------------------------ //
 // Hằng số
@@ -57,7 +58,7 @@ export default function Sessions() {
       const response = await api.get('/sessions/')
       setSessions(response.data)
     } catch (error) {
-      setMessage(error.response?.data?.detail || error.message)
+      setMessage(getApiErrorMessage(error, 'Không tải được danh sách buổi học.'))
     }
   }
 
@@ -68,7 +69,7 @@ export default function Sessions() {
         const response = await api.get('/sessions/')
         if (mounted) setSessions(response.data)
       } catch (error) {
-        if (mounted) setMessage(error.response?.data?.detail || error.message)
+        if (mounted) setMessage(getApiErrorMessage(error, 'Không tải được danh sách buổi học.'))
       }
     }
     load()
@@ -125,7 +126,7 @@ export default function Sessions() {
       resetForm()
       await loadSessions()
     } catch (error) {
-      setMessage(error.response?.data?.detail || error.message)
+      setMessage(getApiErrorMessage(error, 'Không lưu được thông tin buổi học.'))
     } finally {
       setLoading(false)
     }
@@ -160,7 +161,7 @@ export default function Sessions() {
       setDeleteTarget(null)
       await loadSessions()
     } catch (error) {
-      setMessage(error.response?.data?.detail || error.message)
+      setMessage(getApiErrorMessage(error, 'Không xóa được buổi học.'))
     } finally {
       setLoading(false)
     }
@@ -263,10 +264,10 @@ export default function Sessions() {
             Hủy
           </button>
           <button className="secondary" onClick={loadSessions} disabled={loading}>
-            Tải lại
+            Tải lại dữ liệu
           </button>
           <input
-            placeholder="Tìm theo ID, môn, lớp, ngày"
+            placeholder="Tìm theo mã buổi, môn học, lớp hoặc ngày"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ minWidth: 240 }}
@@ -280,7 +281,7 @@ export default function Sessions() {
         <table className="data-table">
           <thead>
             <tr>
-              {['ID', 'Môn học', 'Lớp', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Thao tác'].map((h) => (
+              {['Mã buổi', 'Môn học', 'Lớp', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Thao tác'].map((h) => (
                 <th key={h}>{h}</th>
               ))}
             </tr>

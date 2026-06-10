@@ -5,16 +5,13 @@ import { useAuth } from '../auth/auth-context.js'
 import AttendanceChart from '../components/AttendanceChart.jsx'
 import WarningTable from '../components/WarningTable.jsx'
 import { VALID_CLASSES } from '../constants/classes.js'
+import { getApiErrorMessage } from '../utils/apiError.js'
+import { attendanceStatusLabels, getDisplayLabel, recognitionStatusLabels } from '../utils/displayLabels.js'
 
 // ------------------------------------------------------------------ //
 // Hằng số — đồng bộ với Students.jsx và Sessions.jsx
 // ------------------------------------------------------------------ //
-const statusLabels = {
-  present: 'Có mặt',
-  late:    'Đi trễ',
-  manual:  'Thủ công',
-  absent:  'Vắng',
-}
+const statusLabels = attendanceStatusLabels
 
 // ------------------------------------------------------------------ //
 // Helpers
@@ -72,6 +69,7 @@ export default function Reports() {
   const [loading,           setLoading]           = useState(false)
   const [exporting,         setExporting]         = useState('')
   const [modelEvaluation,   setModelEvaluation]   = useState(null)
+  const [modelEvalDetails,  setModelEvalDetails]  = useState([])
   const [modelEvalLoading,  setModelEvalLoading]  = useState(false)
 
   const selectedSession = useMemo(
@@ -98,7 +96,7 @@ export default function Reports() {
       setError('')
       setMessage(`Đã tải báo cáo lớp ${cls}.`)
     } catch (err) {
-      setError(err.response?.data?.detail || err.message)
+      setError(getApiErrorMessage(err, 'Không tải được báo cáo lớp.'))
       setData([])
       setWarnings([])
     } finally {
@@ -114,7 +112,7 @@ export default function Reports() {
       if (!selectedSessionId && res.data.length > 0)
         setSelectedSessionId(String(res.data[0].id))
     } catch (err) {
-      setError(err.response?.data?.detail || err.message)
+      setError(getApiErrorMessage(err, 'Không tải được danh sách buổi học.'))
     }
   }
 
@@ -127,7 +125,7 @@ export default function Reports() {
       setSessionRows(res.data)
       setError('')
     } catch (err) {
-      setError(err.response?.data?.detail || err.message)
+      setError(getApiErrorMessage(err, 'Không tải được báo cáo buổi học.'))
       setSessionRows([])
     } finally {
       setLoading(false)
@@ -137,11 +135,16 @@ export default function Reports() {
   const loadModelEvaluation = async () => {
     setModelEvalLoading(true)
     try {
-      const res = await api.get('/reports/model-evaluation/stats')
-      setModelEvaluation(res.data)
+      const [statsRes, detailsRes] = await Promise.all([
+        api.get('/reports/model-evaluation/stats'),
+        api.get('/reports/model-evaluation/details'),
+      ])
+      setModelEvaluation(statsRes.data)
+      setModelEvalDetails(detailsRes.data?.items || [])
     } catch (err) {
-      setError(err.response?.data?.detail || err.message)
+      setError(getApiErrorMessage(err, 'Không tải được kết quả đánh giá mô hình.'))
       setModelEvaluation(null)
+      setModelEvalDetails([])
     } finally {
       setModelEvalLoading(false)
     }
@@ -159,7 +162,7 @@ export default function Reports() {
           setSelectedSessionId(String(sessionRes.data[0].id))
         if (isAdmin) await loadModelEvaluation()
       } catch (err) {
-        if (mounted) setError(err.response?.data?.detail || err.message)
+        if (mounted) setError(getApiErrorMessage(err, 'Không tải được dữ liệu báo cáo.'))
       }
     }
     init()
@@ -174,7 +177,7 @@ export default function Reports() {
         const res = await api.get(`/reports/session/${selectedSessionId}`)
         if (mounted) setSessionRows(res.data)
       } catch (err) {
-        if (mounted) { setError(err.response?.data?.detail || err.message); setSessionRows([]) }
+        if (mounted) { setError(getApiErrorMessage(err, 'Không tải được báo cáo buổi học.')); setSessionRows([]) }
       }
     }
     load()
@@ -187,10 +190,10 @@ export default function Reports() {
     try {
       const res = await api.get(url, { responseType: 'blob' })
       downloadBlob(res.data, getFilename(res.headers, fallbackFilename))
-      setMessage(`Đã tải file.`)
+      setMessage('Đã tải tệp báo cáo.')
       setError('')
     } catch (err) {
-      setError(err.response?.data?.detail || err.message)
+      setError(getApiErrorMessage(err, 'Không xuất được báo cáo.'))
     } finally {
       setExporting('')
     }
@@ -219,45 +222,89 @@ export default function Reports() {
             </p>
           </div>
           {isAdmin && (
-            <button onClick={loadModelEvaluation} disabled={modelEvalLoading}>
-              {modelEvalLoading ? 'Đang tải...' : 'Tải đánh giá'}
-            </button>
+            <div className="toolbar" style={{ margin:0 }}>
+              <button onClick={loadModelEvaluation} disabled={modelEvalLoading}>
+                {modelEvalLoading ? 'Đang tải...' : 'Tải đánh giá'}
+              </button>
+              <button
+                onClick={() => exportFile('model-csv', '/reports/export/model-evaluation/csv', 'model_evaluation_details.csv')}
+                disabled={!modelEvaluation?.has_data || exporting === 'model-csv'}
+              >
+                {exporting === 'model-csv' ? 'Đang xuất...' : 'Xuất CSV'}
+              </button>
+              <button
+                onClick={() => exportFile('model-excel', '/reports/export/model-evaluation/excel', 'model_evaluation.xlsx')}
+                disabled={!modelEvaluation?.has_data || exporting === 'model-excel'}
+              >
+                {exporting === 'model-excel' ? 'Đang xuất...' : 'Xuất Excel'}
+              </button>
+            </div>
           )}
         </div>
 
+
         {!modelEvaluation?.has_data ? (
           <div className="empty-state">
-            {modelEvaluation?.message || 'Chưa có dữ liệu đánh giá mô hình. Hãy sử dụng chức năng Kiểm thử mô hình để tạo kết quả.'}
+            {modelEvaluation?.message || 'Chưa có dữ liệu đánh giá mô hình. Hãy chạy chương trình đánh giá với ảnh kiểm thử thật trước.'}
           </div>
         ) : (
-          <div className="grid cards">
-            {[
-              { label:'Số mẫu test', value:modelEvaluation.sample_count, color:'#2563eb' },
-              {
-                label:modelEvaluation.source === 'model_test_log' ? 'Có kết quả match' : 'Nhận diện đúng',
-                value:modelEvaluation.recognized_correct,
-                color:'#15803d',
-              },
-              {
-                label:modelEvaluation.source === 'model_test_log' ? 'Sai (cần ground truth)' : 'Nhận diện sai',
-                value:modelEvaluation.recognized_wrong,
-                color:'#b91c1c',
-              },
-              { label:'Không nhận diện', value:modelEvaluation.not_recognized, color:'#f59e0b' },
-              { label:'Accuracy', value:formatRate(modelEvaluation.accuracy), color:'#7c3aed' },
-              { label:'Avg confidence', value:formatConf(modelEvaluation.average_confidence), color:'#0f766e' },
-              {
-                label:'Avg processing',
-                value:modelEvaluation.average_processing_time_ms == null ? '-' : `${modelEvaluation.average_processing_time_ms} ms`,
-                color:'#475569',
-              },
-            ].map((item) => (
-              <div key={item.label} className="stat-card" style={{ minHeight:92, borderLeftColor:item.color }}>
-                <p>{item.label}</p>
-                <strong>{item.value}</strong>
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="grid cards">
+              {[
+                { label:'Tổng ảnh kiểm thử', value:modelEvaluation.total_images ?? modelEvaluation.sample_count, color:'#2563eb' },
+                { label:'Nhận diện đúng', value:modelEvaluation.recognized_correct, color:'#15803d' },
+                { label:'Nhận diện sai', value:modelEvaluation.recognized_wrong, color:'#b91c1c' },
+                { label:'Không nhận diện được', value:modelEvaluation.not_recognized, color:'#f59e0b' },
+                { label:'TP', value:modelEvaluation.tp, color:'#0f766e' },
+                { label:'FP', value:modelEvaluation.fp, color:'#dc2626' },
+                { label:'FN', value:modelEvaluation.fn, color:'#ea580c' },
+                { label:'TN', value:modelEvaluation.tn, color:'#475569' },
+                { label:'Độ chính xác', value:formatRate(modelEvaluation.accuracy), color:'#7c3aed' },
+                { label:'Độ chính xác dự đoán', value:formatRate(modelEvaluation.precision), color:'#0891b2' },
+                { label:'Độ bao phủ', value:formatRate(modelEvaluation.recall), color:'#0369a1' },
+                { label:'Điểm F1', value:formatRate(modelEvaluation.f1_score), color:'#4f46e5' },
+                { label:'Tỷ lệ chấp nhận sai (FAR)', value:formatRate(modelEvaluation.far), color:'#be123c' },
+                { label:'Tỷ lệ từ chối sai (FRR)', value:formatRate(modelEvaluation.frr), color:'#c2410c' },
+                { label:'Độ tin cậy trung bình', value:formatConf(modelEvaluation.average_confidence), color:'#0f766e' },
+                {
+                  label:'Thời gian xử lý trung bình',
+                  value:modelEvaluation.average_processing_time_ms == null ? '-' : `${modelEvaluation.average_processing_time_ms} ms`,
+                  color:'#475569',
+                },
+              ].map((item) => (
+                <div key={item.label} className="stat-card" style={{ minHeight:92, borderLeftColor:item.color }}>
+                  <p>{item.label}</p>
+                  <strong>{item.value}</strong>
+                </div>
+              ))}
+            </div>
+
+            <div className="table-wrap" style={{ marginTop: 18 }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    {['Tệp/Mẫu', 'Mẫu thực tế', 'Mã dự kiến', 'Mã dự đoán', 'Trạng thái', 'Độ tin cậy', 'Thời gian xử lý', 'Kết luận'].map((h) => (
+                      <th key={h}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {modelEvalDetails.map((row, index) => (
+                    <tr key={`${row.file_name || row.sample_name}-${index}`}>
+                      <td>{row.file_name || row.sample_name || '-'}</td>
+                      <td>{row.actual_student_code || row.sample_code || '-'}</td>
+                      <td>{row.expected_student_code || '-'}</td>
+                      <td>{row.predicted_student_code || '-'}</td>
+                      <td>{getDisplayLabel(recognitionStatusLabels, row.status)}</td>
+                      <td>{formatConf(Number(row.confidence))}</td>
+                      <td>{row.processing_time_ms == null ? '-' : `${Number(row.processing_time_ms).toFixed(2)} ms`}</td>
+                      <td><span className="badge">{row.result || '-'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
@@ -395,7 +442,7 @@ export default function Reports() {
             <table className="data-table">
               <thead>
                 <tr>
-                  {['Mã SV', 'Họ tên', 'Trạng thái', 'Vào lớp', 'Ra về', 'Tin cậy vào', 'Tin cậy ra'].map((h) => (
+                  {['Mã SV', 'Họ tên', 'Trạng thái', 'Vào lớp', 'Ra về', 'Độ tin cậy khi vào', 'Độ tin cậy khi ra'].map((h) => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
@@ -407,7 +454,7 @@ export default function Reports() {
                     <td>{row.full_name || '-'}</td>
                     <td>
                       <span className={`badge ${row.status === 'absent' ? 'danger' : row.status === 'late' ? 'warning' : 'success'}`}>
-                        {statusLabels[row.status] || row.status}
+                        {getDisplayLabel(statusLabels, row.status)}
                       </span>
                     </td>
                     <td>{formatDT(row.check_in_at)}</td>

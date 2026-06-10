@@ -1,6 +1,7 @@
 import csv
 from collections import Counter
 from pathlib import Path
+from time import perf_counter
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,8 @@ from face_service import (
     load_legacy_embeddings,
     match_embedding,
 )
+from models.face_embedding import FaceEmbedding
+from models.student import Student
 
 
 EVALUATION_DIR = BASE_DIR / "evaluation_data"
@@ -28,12 +31,48 @@ KNOWN_DIR = EVALUATION_DIR / "known"
 UNKNOWN_DIR = EVALUATION_DIR / "unknown"
 REPORTS_DIR = BASE_DIR / "reports"
 LEGACY_DB_PATH = BASE_DIR / "data" / "embedding_db.pkl"
+SAMPLE_MAPPING_CSV = EVALUATION_DIR / "sample_mapping.csv"
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
 def safe_divide(numerator, denominator):
     return numerator / denominator if denominator else 0.0
+
+
+def normalize_identity(value):
+    return " ".join(str(value or "").replace("_", " ").strip().lower().split())
+
+
+def build_sample_identity_mapping(db):
+    mapping = {}
+    mapping_sources = {}
+
+    if SAMPLE_MAPPING_CSV.exists():
+        with SAMPLE_MAPPING_CSV.open(newline="", encoding="utf-8-sig") as csv_file:
+            reader = csv.DictReader(csv_file)
+            for row in reader:
+                sample = row.get("sample_code") or row.get("sample_name") or row.get("identity")
+                expected_code = row.get("expected_student_code") or row.get("student_code")
+                normalized = normalize_identity(sample)
+                if normalized and expected_code:
+                    mapping[normalized] = str(expected_code).strip()
+                    mapping_sources[normalized] = "sample_mapping.csv"
+
+    students = (
+        db.query(Student)
+        .join(FaceEmbedding, FaceEmbedding.student_id == Student.id)
+        .filter(Student.face_status == "registered")
+        .all()
+    )
+    for student in students:
+        for identity in (student.student_code, student.full_name):
+            normalized = normalize_identity(identity)
+            if normalized and normalized not in mapping:
+                mapping[normalized] = student.student_code
+                mapping_sources[normalized] = "students"
+
+    return mapping, mapping_sources
 
 
 def list_images(directory):
@@ -48,14 +87,17 @@ def list_images(directory):
 
 
 def recognize_image(image_path, db_embeddings, legacy_embeddings):
+    started_at = perf_counter()
     image_bytes = image_path.read_bytes()
     embedding = image_bytes_to_embedding(image_bytes)
+    processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
 
     if embedding is None:
         return {
             "status": "no_face",
             "student_code": None,
             "confidence": -1.0,
+            "processing_time_ms": processing_time_ms,
         }
 
     status, student_code, confidence = match_embedding(
@@ -69,39 +111,55 @@ def recognize_image(image_path, db_embeddings, legacy_embeddings):
         "status": status,
         "student_code": None if student_code == "Unknown" else student_code,
         "confidence": confidence,
+        "processing_time_ms": round((perf_counter() - started_at) * 1000, 2),
     }
 
 
-def evaluate_known_images(db_embeddings, legacy_embeddings):
+def evaluate_known_images(db_embeddings, legacy_embeddings, sample_mapping, mapping_sources):
     rows = []
-    counters = {"tp": 0, "fn": 0}
+    counters = {"tp": 0, "fp": 0, "fn": 0}
+    unmapped_labels = set()
 
     if not KNOWN_DIR.exists():
-        return rows, counters
+        return rows, counters, unmapped_labels
 
     for student_dir in sorted(path for path in KNOWN_DIR.iterdir() if path.is_dir()):
         label = student_dir.name
+        normalized_label = normalize_identity(label)
+        expected_code = sample_mapping.get(normalized_label)
+        if not expected_code:
+            unmapped_labels.add(label)
+            continue
+
         for image_path in list_images(student_dir):
             result = recognize_image(image_path, db_embeddings, legacy_embeddings)
             predicted_code = result["student_code"]
-            is_tp = result["status"] == "success" and predicted_code == label
-            outcome = "TP" if is_tp else "FN"
-            counters["tp" if is_tp else "fn"] += 1
+            is_tp = result["status"] == "success" and predicted_code == expected_code
+            is_wrong_identity = result["status"] == "success" and predicted_code and predicted_code != expected_code
+            outcome = "TP" if is_tp else "FP" if is_wrong_identity else "FN"
+            counters["tp" if is_tp else "fp" if is_wrong_identity else "fn"] += 1
 
             rows.append(
                 {
                     "dataset_type": "known",
+                    "file_name": image_path.name,
+                    "sample_name": image_path.stem,
                     "image_path": str(image_path.relative_to(BASE_DIR)),
+                    "actual_student_code": label,
+                    "sample_code": label,
+                    "expected_student_code": expected_code,
+                    "mapping_source": mapping_sources.get(normalized_label, ""),
                     "true_label": label,
                     "predicted_student_code": predicted_code or "",
                     "status": result["status"],
                     "confidence": result["confidence"],
                     "confidence_percent": detail_confidence_percent(result["confidence"]),
+                    "processing_time_ms": result["processing_time_ms"],
                     "result": outcome,
                 }
             )
 
-    return rows, counters
+    return rows, counters, unmapped_labels
 
 
 def evaluate_unknown_images(db_embeddings, legacy_embeddings):
@@ -124,12 +182,19 @@ def evaluate_unknown_images(db_embeddings, legacy_embeddings):
         rows.append(
             {
                 "dataset_type": "unknown",
+                "file_name": image_path.name,
+                "sample_name": image_path.stem,
                 "image_path": str(image_path.relative_to(BASE_DIR)),
+                "actual_student_code": "",
+                "sample_code": "unknown",
+                "expected_student_code": "",
+                "mapping_source": "",
                 "true_label": "unknown",
                 "predicted_student_code": predicted_code or "",
                 "status": result["status"],
                 "confidence": result["confidence"],
                 "confidence_percent": detail_confidence_percent(result["confidence"]),
+                "processing_time_ms": result["processing_time_ms"],
                 "result": outcome,
             }
         )
@@ -185,12 +250,19 @@ def write_details_csv(rows):
     output_path = REPORTS_DIR / "evaluation_details.csv"
     fieldnames = [
         "dataset_type",
+        "file_name",
+        "sample_name",
         "image_path",
+        "actual_student_code",
+        "sample_code",
+        "expected_student_code",
+        "mapping_source",
         "true_label",
         "predicted_student_code",
         "status",
         "confidence",
         "confidence_percent",
+        "processing_time_ms",
         "result",
     ]
     with output_path.open("w", newline="", encoding="utf-8") as csv_file:
@@ -319,18 +391,31 @@ def main():
     db = SessionLocal()
     try:
         db_embeddings = fetch_db_embeddings(db)
+        sample_mapping, mapping_sources = build_sample_identity_mapping(db)
     finally:
         db.close()
 
     legacy_embeddings = load_legacy_embeddings(LEGACY_DB_PATH) if ENABLE_LEGACY_EMBEDDINGS else {}
 
-    known_rows, known_counters = evaluate_known_images(db_embeddings, legacy_embeddings)
+    known_rows, known_counters, unmapped_labels = evaluate_known_images(
+        db_embeddings,
+        legacy_embeddings,
+        sample_mapping,
+        mapping_sources,
+    )
+    if unmapped_labels:
+        labels = ", ".join(sorted(unmapped_labels))
+        raise SystemExit(
+            "Missing sample identity mapping for known evaluation folders: "
+            f"{labels}. Add matching students/full_name with embeddings or create "
+            "backend/evaluation_data/sample_mapping.csv with sample_code,expected_student_code."
+        )
     unknown_rows, unknown_counters = evaluate_unknown_images(db_embeddings, legacy_embeddings)
 
     tp = known_counters["tp"]
     fn = known_counters["fn"]
     tn = unknown_counters["tn"]
-    fp = unknown_counters["fp"]
+    fp = unknown_counters["fp"] + known_counters["fp"]
     uncertain_unknown = unknown_counters["uncertain_unknown"]
 
     metrics = calculate_metrics(tp, tn, fp, fn)

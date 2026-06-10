@@ -67,7 +67,7 @@ STATUS_LABELS = {
     "present": "Có mặt",
     "late": "Đi trễ",
     "manual": "Thủ công",
-    "absent": "Vắng",
+    "absent": "Vắng mặt",
 }
 SUMMARY_COLUMNS = {
     "student_code": "Mã SV",
@@ -76,7 +76,7 @@ SUMMARY_COLUMNS = {
     "present": "Có mặt",
     "late": "Đi trễ",
     "manual": "Thủ công",
-    "absent": "Vắng",
+    "absent": "Vắng mặt",
     "attended": "Tổng có mặt",
     "total_sessions": "Tổng buổi",
     "rate": "Tỷ lệ chuyên cần",
@@ -93,8 +93,8 @@ SESSION_COLUMNS = {
     "status": "Trạng thái",
     "check_in_at": "Vào lớp",
     "check_out_at": "Ra về",
-    "check_in_conf": "Tin cậy vào",
-    "check_out_conf": "Tin cậy ra",
+    "check_in_conf": "Độ tin cậy khi vào",
+    "check_out_conf": "Độ tin cậy khi ra",
     "note": "Ghi chú",
 }
 
@@ -211,6 +211,123 @@ def _session_export_frame(rows):
     return pd.DataFrame(normalized).rename(columns=SESSION_COLUMNS)
 
 
+def _read_evaluation_reports():
+    if not EVALUATION_METRICS_CSV.exists() or not EVALUATION_DETAILS_CSV.exists():
+        return None, None
+
+    try:
+        metrics = pd.read_csv(EVALUATION_METRICS_CSV)
+        details = pd.read_csv(EVALUATION_DETAILS_CSV)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Không đọc được báo cáo đánh giá mô hình. Vui lòng kiểm tra lại tệp báo cáo.",
+        ) from exc
+
+    return metrics, _normalize_evaluation_details(details)
+
+
+def _normalize_evaluation_details(details):
+    def clean_code(value):
+        if value is None or pd.isna(value):
+            return None
+        text_value = str(value)
+        if text_value.endswith(".0"):
+            return text_value[:-2]
+        return text_value
+
+    details = details.copy()
+    if "image_path" not in details:
+        details["image_path"] = ""
+    if "file_name" not in details:
+        details["file_name"] = details["image_path"].apply(lambda value: Path(str(value)).name if value else "")
+    if "sample_name" not in details:
+        details["sample_name"] = details["file_name"].apply(lambda value: Path(str(value)).stem if value else "")
+    if "actual_student_code" not in details:
+        details["actual_student_code"] = details.get("true_label", "")
+    if "sample_code" not in details:
+        details["sample_code"] = details["actual_student_code"]
+    if "expected_student_code" not in details:
+        details["expected_student_code"] = details["actual_student_code"]
+    if "mapping_source" not in details:
+        details["mapping_source"] = ""
+    if "predicted_student_code" not in details:
+        details["predicted_student_code"] = ""
+    if "status" not in details:
+        details["status"] = ""
+    if "confidence" not in details:
+        details["confidence"] = None
+    if "processing_time_ms" not in details:
+        details["processing_time_ms"] = None
+    if "result" not in details:
+        details["result"] = ""
+
+    details = details.where(pd.notnull(details), None)
+    for column in ("actual_student_code", "sample_code", "expected_student_code", "predicted_student_code"):
+        if column in details:
+            details[column] = details[column].apply(clean_code)
+    return details
+
+
+def _evaluation_metric_summary(metrics, details):
+    total_images = int(_metric_value(metrics, "Total images", len(details)))
+    tp = int(_metric_value(metrics, "TP", 0))
+    tn = int(_metric_value(metrics, "TN", 0))
+    fp = int(_metric_value(metrics, "FP", 0))
+    fn = int(_metric_value(metrics, "FN", 0))
+
+    result_series = details["result"].fillna("").astype(str).str.upper() if "result" in details else pd.Series(dtype=str)
+    status_series = details["status"].fillna("").astype(str) if "status" in details else pd.Series(dtype=str)
+    confidence_values = pd.to_numeric(details.get("confidence"), errors="coerce")
+    confidence_values = confidence_values[confidence_values >= 0]
+    processing_values = pd.to_numeric(details.get("processing_time_ms"), errors="coerce").dropna()
+
+    return {
+        "has_data": total_images > 0 and not details.empty,
+        "source": "evaluation_csv",
+        "sample_count": total_images,
+        "total_images": total_images,
+        "recognized_correct": int((result_series == "TP").sum()),
+        "recognized_wrong": int((result_series == "FP").sum()),
+        "not_recognized": int(status_series.isin(["unknown", "no_face", "multiple_faces"]).sum()),
+        "tp": tp,
+        "tn": tn,
+        "fp": fp,
+        "fn": fn,
+        "accuracy": _metric_value(metrics, "Accuracy", 0),
+        "precision": _metric_value(metrics, "Precision", 0),
+        "recall": _metric_value(metrics, "Recall", 0),
+        "f1_score": _metric_value(metrics, "F1-score", 0),
+        "far": _metric_value(metrics, "FAR", 0),
+        "frr": _metric_value(metrics, "FRR", 0),
+        "average_confidence": round(float(confidence_values.mean()), 4) if not confidence_values.empty else 0,
+        "average_processing_time_ms": round(float(processing_values.mean()), 2) if not processing_values.empty else None,
+        "detail_count": int(len(details)),
+    }
+
+
+def _evaluation_details_records(details):
+    columns = [
+        "file_name",
+        "sample_name",
+        "actual_student_code",
+        "sample_code",
+        "expected_student_code",
+        "predicted_student_code",
+        "status",
+        "confidence",
+        "processing_time_ms",
+        "result",
+        "mapping_source",
+        "dataset_type",
+        "image_path",
+    ]
+    for column in columns:
+        if column not in details:
+            details[column] = None
+    return details[columns].to_dict(orient="records")
+
+
 def _format_excel_sheet(worksheet):
     header_fill = PatternFill("solid", fgColor="D9EAF7")
     header_font = Font(name="Arial", bold=True, color="111827")
@@ -241,83 +358,93 @@ def get_dashboard_stats(_current_user=Depends(get_current_user), db: Session = D
 
 @router.get("/model-evaluation/stats")
 def get_model_evaluation_stats(_current_user=Depends(require_admin)):
-    if not EVALUATION_METRICS_CSV.exists() or not EVALUATION_DETAILS_CSV.exists():
-        if MODEL_TEST_LOG_CSV.exists():
-            try:
-                logs = pd.read_csv(MODEL_TEST_LOG_CSV)
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Cannot read model test log: {exc}") from exc
-
-            if not logs.empty:
-                confidence_values = pd.to_numeric(logs.get("confidence"), errors="coerce")
-                confidence_values = confidence_values[confidence_values >= 0]
-                avg_confidence = float(confidence_values.mean()) if not confidence_values.empty else 0.0
-                processing_values = pd.to_numeric(logs.get("processing_time_ms"), errors="coerce").dropna()
-                recognized = logs["status"].isin(["success", "uncertain"]) if "status" in logs else []
-                not_recognized = logs["status"].isin(["unknown", "no_face", "multiple_faces"]).sum() if "status" in logs else 0
-                return {
-                    "has_data": True,
-                    "sample_count": int(len(logs)),
-                    "recognized_correct": int(recognized.sum()) if hasattr(recognized, "sum") else 0,
-                    "recognized_wrong": 0,
-                    "not_recognized": int(not_recognized),
-                    "accuracy": 0,
-                    "average_confidence": round(avg_confidence, 4),
-                    "average_processing_time_ms": round(float(processing_values.mean()), 2) if not processing_values.empty else None,
-                    "source": "model_test_log",
-                }
-
+    metrics, details = _read_evaluation_reports()
+    if metrics is None or details is None:
         return {
             "has_data": False,
-            "message": "Chưa có dữ liệu đánh giá mô hình. Hãy sử dụng chức năng Kiểm thử mô hình để tạo kết quả.",
+            "message": (
+                "Chưa có dữ liệu đánh giá mô hình. "
+                "Vui lòng chạy evaluate_recognition.py với ảnh kiểm thử thật trước khi lấy số liệu báo cáo."
+            ),
         }
 
-    try:
-        metrics = pd.read_csv(EVALUATION_METRICS_CSV)
-        details = pd.read_csv(EVALUATION_DETAILS_CSV)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Cannot read evaluation reports: {exc}") from exc
-
-    total_images = int(_metric_value(metrics, "Total images", 0))
-    if total_images <= 0 or details.empty:
+    summary = _evaluation_metric_summary(metrics, details)
+    if not summary["has_data"]:
         return {
             "has_data": False,
-            "message": "Chưa có dữ liệu đánh giá mô hình. Hãy sử dụng chức năng Kiểm thử mô hình để tạo kết quả.",
+            "message": "Tệp đánh giá đã tồn tại nhưng chưa có mẫu kiểm thử hợp lệ.",
         }
+    return summary
 
-    tp = int(_metric_value(metrics, "TP", 0))
-    tn = int(_metric_value(metrics, "TN", 0))
-    fp = int(_metric_value(metrics, "FP", 0))
-    fn = int(_metric_value(metrics, "FN", 0))
-    recognized_correct = tp + tn
-    recognized_wrong = fp + fn
 
-    status_series = details["status"] if "status" in details else pd.Series(dtype=str)
-    not_recognized = int(status_series.isin(["unknown", "no_face"]).sum())
-    avg_confidence = 0.0
-    if "confidence" in details:
-        confidence_values = pd.to_numeric(details["confidence"], errors="coerce")
-        confidence_values = confidence_values[confidence_values >= 0]
-        avg_confidence = float(confidence_values.mean()) if not confidence_values.empty else 0.0
-
-    avg_processing_time_ms = None
-    for column in ("processing_time_ms", "processing_ms"):
-        if column in details:
-            values = pd.to_numeric(details[column], errors="coerce").dropna()
-            avg_processing_time_ms = float(values.mean()) if not values.empty else None
-            break
+@router.get("/model-evaluation/details")
+def get_model_evaluation_details(_current_user=Depends(require_admin)):
+    metrics, details = _read_evaluation_reports()
+    if metrics is None or details is None or details.empty:
+        return {"has_data": False, "items": []}
 
     return {
         "has_data": True,
-        "sample_count": total_images,
-        "recognized_correct": recognized_correct,
-        "recognized_wrong": recognized_wrong,
-        "not_recognized": not_recognized,
-        "accuracy": _metric_value(metrics, "Accuracy", 0),
-        "average_confidence": round(avg_confidence, 4),
-        "average_processing_time_ms": round(avg_processing_time_ms, 2) if avg_processing_time_ms is not None else None,
-        "source": "evaluation_csv",
+        "summary": _evaluation_metric_summary(metrics, details),
+        "items": _evaluation_details_records(details),
     }
+
+
+@router.get("/export/model-evaluation/csv")
+def export_model_evaluation_csv(_current_user=Depends(require_admin)):
+    metrics, details = _read_evaluation_reports()
+    if metrics is None or details is None or details.empty:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu đánh giá mô hình.")
+
+    stream = io.StringIO()
+    pd.DataFrame(_evaluation_details_records(details)).to_csv(stream, index=False, encoding="utf-8-sig")
+    output = io.BytesIO(stream.getvalue().encode("utf-8-sig"))
+    return StreamingResponse(
+        output,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=model_evaluation_details.csv"},
+    )
+
+
+@router.get("/export/model-evaluation/excel")
+def export_model_evaluation_excel(_current_user=Depends(require_admin)):
+    metrics, details = _read_evaluation_reports()
+    if metrics is None or details is None or details.empty:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu đánh giá mô hình.")
+
+    summary = _evaluation_metric_summary(metrics, details)
+    summary_rows = [
+        {"metric": "Tổng ảnh kiểm thử", "value": summary["total_images"]},
+        {"metric": "Nhận diện đúng", "value": summary["recognized_correct"]},
+        {"metric": "Nhận diện sai", "value": summary["recognized_wrong"]},
+        {"metric": "Không nhận diện được", "value": summary["not_recognized"]},
+        {"metric": "TP", "value": summary["tp"]},
+        {"metric": "FP", "value": summary["fp"]},
+        {"metric": "FN", "value": summary["fn"]},
+        {"metric": "TN", "value": summary["tn"]},
+        {"metric": "Độ chính xác", "value": summary["accuracy"]},
+        {"metric": "Độ chính xác dự đoán", "value": summary["precision"]},
+        {"metric": "Độ bao phủ", "value": summary["recall"]},
+        {"metric": "Điểm F1", "value": summary["f1_score"]},
+        {"metric": "Tỷ lệ chấp nhận sai (FAR)", "value": summary["far"]},
+        {"metric": "Tỷ lệ từ chối sai (FRR)", "value": summary["frr"]},
+        {"metric": "Độ tin cậy trung bình", "value": summary["average_confidence"]},
+        {"metric": "Thời gian xử lý trung bình (ms)", "value": summary["average_processing_time_ms"]},
+    ]
+
+    stream = io.BytesIO()
+    with pd.ExcelWriter(stream, engine="openpyxl") as writer:
+        pd.DataFrame(summary_rows).to_excel(writer, index=False, sheet_name="Chỉ số")
+        pd.DataFrame(_evaluation_details_records(details)).to_excel(writer, index=False, sheet_name="Chi tiết")
+        _format_excel_sheet(writer.sheets["Chỉ số"])
+        _format_excel_sheet(writer.sheets["Chi tiết"])
+    stream.seek(0)
+
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=model_evaluation.xlsx"},
+    )
 
 
 @router.get("/summary/{class_name}")
@@ -373,7 +500,7 @@ def export_pdf(class_name: str, _current_user=Depends(require_admin), db: Sessio
     subtitle = f"Tổng số sinh viên: {len(summary)}  |  Tổng buổi học: {summary[0]['total_sessions']}"
     y = _draw_header(c, y, title, subtitle)
 
-    headers = ["Mã SV", "Họ tên", "Có mặt", "Trễ", "Vắng", "Tổng", "Tỷ lệ", "Cảnh báo"]
+    headers = ["Mã SV", "Họ tên", "Có mặt", "Trễ", "Vắng mặt", "Tổng", "Tỷ lệ", "Cảnh báo"]
     widths = [80, 220, 55, 45, 50, 50, 60, 60]
     y = _draw_row(c, y, headers, widths, bold=True)
     c.setLineWidth(0.3)
@@ -408,7 +535,7 @@ def export_pdf(class_name: str, _current_user=Depends(require_admin), db: Sessio
 def export_warning_excel(class_name: str, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     summary = report_service.build_class_summary(class_name, db)
     if not summary:
-        raise HTTPException(status_code=404, detail="No data found for this class.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu của lớp này.")
 
     warnings = [item for item in summary if item["warning"]]
     stream = io.BytesIO()
@@ -429,7 +556,7 @@ def export_warning_excel(class_name: str, _current_user=Depends(require_admin), 
 def export_session_excel(session_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     session, rows = report_service.build_session_report(session_id, db)
     if not rows:
-        raise HTTPException(status_code=404, detail="No data found for this session.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu của buổi học này.")
 
     stream = io.BytesIO()
     with pd.ExcelWriter(stream, engine="openpyxl") as writer:
@@ -451,7 +578,7 @@ def export_session_excel(session_id: int, _current_user=Depends(require_admin), 
 def export_session_pdf(session_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     session, rows = report_service.build_session_report(session_id, db)
     if not rows:
-        raise HTTPException(status_code=404, detail="No data found for this session.")
+        raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu của buổi học này.")
 
     stream = io.BytesIO()
     c, y = _new_pdf(stream)
@@ -464,7 +591,7 @@ def export_session_pdf(session_id: int, _current_user=Depends(require_admin), db
     )
     y = _draw_header(c, y, title, subtitle)
 
-    headers = ["Mã SV", "Họ tên", "Trạng thái", "Vào lớp", "Ra về", "Tin cậy"]
+    headers = ["Mã SV", "Họ tên", "Trạng thái", "Vào lớp", "Ra về", "Độ tin cậy"]
     widths = [80, 200, 90, 110, 110, 65]
     y = _draw_row(c, y, headers, widths, bold=True)
     c.setLineWidth(0.3)

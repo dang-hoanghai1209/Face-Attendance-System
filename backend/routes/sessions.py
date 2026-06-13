@@ -11,6 +11,7 @@ from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
+from models.student import Student
 from models.subject import Subject
 from services.auth_service import get_current_user, require_admin
 from services.class_service import VALID_CLASS_SET
@@ -19,6 +20,9 @@ from services.class_service import VALID_CLASS_SET
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 VALID_CLASSES = VALID_CLASS_SET
+MIN_STUDENTS_PER_SESSION_CLASS = 5
+MISSING_GPS_MESSAGE = "Thiếu tọa độ GPS của buổi học"
+MIN_STUDENTS_MESSAGE = "Lớp cần tối thiểu 5 sinh viên"
 
 
 def _validate_class(v: Optional[str]) -> Optional[str]:
@@ -43,6 +47,10 @@ def _validate_time_range(start_time: Optional[time], end_time: Optional[time]) -
 class SessionCreate(BaseModel):
     subject: str
     class_name: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_meters: Optional[int] = 50
+    room_name: Optional[str] = None
     session_date: date
     start_time: time
     end_time: time
@@ -94,6 +102,13 @@ def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depe
 
 @router.post("/")
 def create_session(session_data: SessionCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+    if session_data.latitude is None or session_data.longitude is None:
+        raise HTTPException(status_code=422, detail=MISSING_GPS_MESSAGE)
+
+    student_count = db.query(Student).filter(Student.class_name == session_data.class_name).count()
+    if student_count < MIN_STUDENTS_PER_SESSION_CLASS:
+        raise HTTPException(status_code=422, detail=MIN_STUDENTS_MESSAGE)
+
     new_session = ClassSession(**session_data.model_dump())
     db.add(new_session)
     db.commit()

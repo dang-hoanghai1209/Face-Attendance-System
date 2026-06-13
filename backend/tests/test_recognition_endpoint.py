@@ -197,11 +197,29 @@ class RecognitionEndpointTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["student_code"], "63123456")
+        self.assertEqual(result["confidence"], 0.93)
+        self.assertEqual(result["full_name"], "Cross Class Student")
+        self.assertIsNotNone(result["student"])
+        self.assertIsNotNone(result["audit_id"])
         self.assertEqual(result["face_count"], 2)
         self.assertEqual(len(result["results"]), 2)
+        required_fields = {
+            "student_code",
+            "full_name",
+            "class_name",
+            "confidence",
+            "status",
+            "liveness_score",
+            "bbox",
+        }
+        for item in result["results"]:
+            self.assertTrue(required_fields.issubset(item.keys()))
         self.assertEqual(result["results"][0]["student_code"], "63123456")
         self.assertEqual(result["results"][0]["full_name"], "Cross Class Student")
         self.assertEqual(result["results"][0]["class_name"], "63LFW")
+        self.assertEqual(result["results"][0]["confidence"], 0.93)
+        self.assertEqual(result["results"][0]["status"], "success")
+        self.assertIsNone(result["results"][0]["liveness_score"])
         self.assertEqual(result["results"][0]["bbox"], {"x": 10, "y": 20, "w": 30, "h": 40})
         self.assertEqual(result["results"][1]["status"], "uncertain")
         self.assertEqual(result["results"][1]["student_code"], "63123457")
@@ -235,6 +253,10 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(result["results"][1]["confidence"], main.THRESHOLD_UNCERTAIN)
         self.assertLess(result["results"][2]["confidence"], main.THRESHOLD_UNCERTAIN)
         self.assertIsNone(result["results"][2]["student_code"])
+        self.assertIsNone(result["results"][2]["full_name"])
+        self.assertIsNone(result["results"][2]["class_name"])
+        self.assertIsNone(result["results"][2]["liveness_score"])
+        self.assertEqual(result["results"][2]["bbox"], {"x": 3, "y": 3, "w": 10, "h": 10})
 
 
 if __name__ == "__main__":

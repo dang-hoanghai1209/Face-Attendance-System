@@ -8,6 +8,7 @@ os.environ.setdefault("APP_TIMEZONE", "Asia/Nha_Trang")
 
 from database import Base, SessionLocal, engine
 from models.attendance import Attendance
+from models.attendance_scan import AttendanceScan
 from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.enrollment import Enrollment
@@ -136,6 +137,109 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         self.assertEqual(response["data"]["status"], "present")
         self.assertEqual(response["data"]["check_in_conf"], 0.91)
+
+    def test_checkin_creates_attendance_scan_and_updates_scan_fields(self):
+        self.add_student()
+        session = self.add_session()
+        scanned_at = datetime(2026, 5, 30, 7, 31)
+        self.patch_now(scanned_at)
+
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.91,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+            liveness_passed=True,
+        )
+        record = self.db.query(Attendance).filter(Attendance.id == response["data"]["record_id"]).first()
+        scans = self.db.query(AttendanceScan).filter(AttendanceScan.attendance_id == record.id).all()
+
+        self.assertEqual(record.scan_count, 1)
+        self.assertEqual(record.last_scan_at, scanned_at)
+        self.assertEqual(len(scans), 1)
+        self.assertEqual(scans[0].scan_index, 1)
+        self.assertEqual(scans[0].confidence, 0.91)
+        self.assertEqual(scans[0].gps_lat, session.latitude)
+        self.assertEqual(scans[0].gps_lng, session.longitude)
+        self.assertTrue(scans[0].liveness_passed)
+        self.assertEqual(scans[0].note, "check_in")
+
+    def test_checkin_fsm_marks_left_early_then_restores_original_status(self):
+        self.add_student()
+        session = self.add_session()
+
+        self.patch_now(datetime(2026, 5, 30, 7, 31))
+        first = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.91,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
+        self.assertEqual(first["data"]["status"], "present")
+        self.restore_now()
+
+        self.patch_now(datetime(2026, 5, 30, 7, 34))
+        second = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.88,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
+        self.assertEqual(second["data"]["status"], "left_early")
+        self.restore_now()
+
+        self.patch_now(datetime(2026, 5, 30, 7, 36))
+        third = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.93,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
+
+        record = self.db.query(Attendance).filter(Attendance.id == third["data"]["record_id"]).first()
+        scans = (
+            self.db.query(AttendanceScan)
+            .filter(AttendanceScan.attendance_id == record.id)
+            .order_by(AttendanceScan.scan_index.asc())
+            .all()
+        )
+        self.assertEqual(third["data"]["status"], "present")
+        self.assertEqual(record.scan_count, 3)
+        self.assertEqual([scan.scan_index for scan in scans], [1, 2, 3])
+        self.assertEqual([scan.note for scan in scans], ["check_in", "marked_left_early", "restored_attendance"])
+
+    def test_checkin_fsm_does_not_change_manual_attendance(self):
+        self.add_student()
+        session = self.add_session()
+        self.patch_now(datetime(2026, 5, 30, 7, 31))
+        manual = attendance_service.record_manual_attendance(self.db, "63133870", session.id, note="Teacher confirmed")
+        self.assertEqual(manual["data"]["status"], "manual")
+        self.restore_now()
+
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.89,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
+        record = self.db.query(Attendance).filter(Attendance.id == response["data"]["record_id"]).first()
+        scan = self.db.query(AttendanceScan).filter(AttendanceScan.attendance_id == record.id).one()
+
+        self.assertEqual(response["data"]["status"], "manual")
+        self.assertEqual(record.scan_count, 1)
+        self.assertEqual(scan.scan_index, 1)
+        self.assertEqual(scan.note, "manual_unchanged")
 
     def test_manual_student_defaults_to_real_source(self):
         student = Student(student_code="63133870", full_name="Nguyen Van A", class_name="63HTTT")

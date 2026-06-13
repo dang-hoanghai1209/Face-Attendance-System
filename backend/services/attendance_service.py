@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.attendance import Attendance
+from models.attendance_scan import AttendanceScan
 from models.enrollment import Enrollment
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
@@ -262,6 +263,8 @@ def serialize_record(record: Attendance, student: Student):
         "gps_accuracy": record.gps_accuracy,
         "distance_meters": record.distance_meters,
         "liveness_passed": record.liveness_passed,
+        "scan_count": record.scan_count,
+        "last_scan_at": record.last_scan_at.isoformat() if record.last_scan_at else None,
         "note": record.note,
     }
 
@@ -295,6 +298,39 @@ def allowed_radius_for_session(db: Session, session: ClassSession):
     return session.radius_meters
 
 
+def next_scan_index(db: Session, record: Attendance):
+    persisted_scan_count = db.query(AttendanceScan).filter(AttendanceScan.attendance_id == record.id).count()
+    return max(record.scan_count or 0, persisted_scan_count) + 1
+
+
+def create_attendance_scan(
+    db: Session,
+    record: Attendance,
+    *,
+    scanned_at: datetime,
+    confidence=None,
+    gps_lat=None,
+    gps_lng=None,
+    liveness_passed=None,
+    note=None,
+):
+    scan_index = next_scan_index(db, record)
+    record.scan_count = scan_index
+    record.last_scan_at = scanned_at
+    scan = AttendanceScan(
+        attendance_id=record.id,
+        scanned_at=scanned_at,
+        confidence=confidence,
+        gps_lat=gps_lat,
+        gps_lng=gps_lng,
+        liveness_passed=liveness_passed,
+        scan_index=scan_index,
+        note=note,
+    )
+    db.add(scan)
+    return scan
+
+
 def already_checked_in_response(record: Attendance, student: Student, session: ClassSession | None = None, db: Session | None = None):
     return flatten_checkin_response(
         "success",
@@ -314,17 +350,38 @@ def record_checkin(
     gps_lat=None,
     gps_lng=None,
     gps_accuracy=None,
+    liveness_passed=None,
 ):
     student, session = get_student_and_session(db, student_code, session_id)
     existing = get_session_record(db, student.id, session_id)
 
-    if existing:
-        return already_checked_in_response(existing, student, session, db)
-
     check_in_at = now_in_app_timezone()
     validate_checkin_window(session, check_in_at)
     gps_data = validate_gps(db, session, gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy=gps_accuracy) or {}
-    attendance_status = calculate_attendance_status(session, check_in_at)
+
+    if existing:
+        if existing.status in {"present", "late"}:
+            existing.status = "left_early"
+            scan_note = "marked_left_early"
+        elif existing.status == "left_early":
+            existing.status = calculate_attendance_status(session, existing.check_in_at or check_in_at)
+            scan_note = "restored_attendance"
+        else:
+            scan_note = "manual_unchanged"
+
+        create_attendance_scan(
+            db,
+            existing,
+            scanned_at=check_in_at,
+            confidence=confidence,
+            gps_lat=gps_data.get("gps_lat"),
+            gps_lng=gps_data.get("gps_lng"),
+            liveness_passed=liveness_passed,
+            note=scan_note,
+        )
+        db.commit()
+        db.refresh(existing)
+        return already_checked_in_response(existing, student, session, db)
 
     record = Attendance(
         student_id=student.id,
@@ -336,17 +393,38 @@ def record_checkin(
         gps_lng=gps_data.get("gps_lng"),
         gps_accuracy=gps_data.get("gps_accuracy"),
         distance_meters=gps_data.get("distance_meters"),
-        liveness_passed=False,
-        status=attendance_status,
+        liveness_passed=liveness_passed if liveness_passed is not None else False,
+        status=calculate_attendance_status(session, check_in_at),
     )
     db.add(record)
     try:
+        db.flush()
+        create_attendance_scan(
+            db,
+            record,
+            scanned_at=check_in_at,
+            confidence=confidence,
+            gps_lat=gps_data.get("gps_lat"),
+            gps_lng=gps_data.get("gps_lng"),
+            liveness_passed=liveness_passed,
+            note="check_in",
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         existing = get_session_record(db, student.id, session_id)
         if existing:
-            return already_checked_in_response(existing, student, session, db)
+            return record_checkin(
+                db,
+                student_code=student_code,
+                session_id=session_id,
+                confidence=confidence,
+                image_path=image_path,
+                gps_lat=gps_lat,
+                gps_lng=gps_lng,
+                gps_accuracy=gps_accuracy,
+                liveness_passed=liveness_passed,
+            )
         raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
     db.refresh(record)
 

@@ -36,7 +36,7 @@ from models.student import Student
 from models.subject import Subject  # noqa: F401
 from models.user import User  # noqa: F401
 from schema_sync import sync_schema
-from routes import attendance, auth, classrooms, course_sections, enrollments, faces, reports, sessions, students, subjects
+from routes import alerts, attendance, auth, classrooms, course_sections, enrollments, faces, reports, sessions, students, subjects
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
 from services.attendance_service import (
@@ -543,6 +543,7 @@ app.include_router(classrooms.router)
 app.include_router(subjects.router)
 app.include_router(course_sections.router)
 app.include_router(enrollments.router)
+app.include_router(alerts.router)
 app.include_router(attendance.router)
 app.include_router(sessions.router)
 app.include_router(reports.router)

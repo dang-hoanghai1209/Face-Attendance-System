@@ -1,4 +1,5 @@
 import io
+import math
 import os
 import pickle
 from threading import Lock
@@ -18,12 +19,28 @@ _model_lock = Lock()
 _detector = None
 _embedder = None
 
+
+def _parse_float_env(name, default, minimum=None, maximum=None):
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+
+    if minimum is not None:
+        value = max(value, minimum)
+    if maximum is not None:
+        value = min(value, maximum)
+    return value
+
+
 THRESHOLD_CONFIRM = min(max(float(os.getenv("THRESHOLD_CONFIRM", "0.75")), 0.0), 1.0)
 THRESHOLD_UNCERTAIN = min(max(float(os.getenv("THRESHOLD_UNCERTAIN", "0.60")), 0.0), 1.0)
 ENABLE_LEGACY_EMBEDDINGS = os.getenv("ENABLE_LEGACY_EMBEDDINGS", "false").lower() == "true"
 MAX_RECOGNITION_FACES = 4
 ENABLE_LIVENESS = os.getenv("ENABLE_LIVENESS", "false").lower() in {"1", "true", "yes", "on"}
-LIVENESS_THRESHOLD = min(max(float(os.getenv("LIVENESS_THRESHOLD", "0.80")), 0.0), 1.0)
+LIVENESS_THRESHOLD = _parse_float_env("LIVENESS_THRESHOLD", 0.80, minimum=0.0, maximum=1.0)
 LIVENESS_MODEL = os.getenv("LIVENESS_MODEL", "minifasnet")
 
 

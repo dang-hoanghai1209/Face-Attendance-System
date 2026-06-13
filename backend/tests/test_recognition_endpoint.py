@@ -1,4 +1,5 @@
 import io
+import importlib
 import os
 import unittest
 from datetime import date, time
@@ -10,6 +11,7 @@ import torch
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
+import face_service
 import main
 from database import Base, SessionLocal, engine
 from models.recognition_attempt import RecognitionAttempt
@@ -29,6 +31,9 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.original_count_faces = main.count_faces_in_image_bytes
         self.original_fetch_db_embeddings = main.fetch_db_embeddings
         self.original_match_embedding = main.match_embedding
+        self.original_liveness_enabled = face_service.ENABLE_LIVENESS
+        self.original_liveness_threshold = face_service.LIVENESS_THRESHOLD
+        self.original_liveness_model = face_service.LIVENESS_MODEL
 
     def tearDown(self):
         main.check_liveness = self.original_check_liveness
@@ -37,6 +42,9 @@ class RecognitionEndpointTests(unittest.TestCase):
         main.count_faces_in_image_bytes = self.original_count_faces
         main.fetch_db_embeddings = self.original_fetch_db_embeddings
         main.match_embedding = self.original_match_embedding
+        face_service.ENABLE_LIVENESS = self.original_liveness_enabled
+        face_service.LIVENESS_THRESHOLD = self.original_liveness_threshold
+        face_service.LIVENESS_MODEL = self.original_liveness_model
         self.db.close()
         Base.metadata.drop_all(bind=engine)
 
@@ -202,6 +210,26 @@ class RecognitionEndpointTests(unittest.TestCase):
         audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
         self.assertEqual(audit.status, "spoof")
 
+    def test_recognize_liveness_unavailable_returns_spoof_without_recognition(self):
+        session = self.add_session()
+        face_service.ENABLE_LIVENESS = True
+        face_service.LIVENESS_THRESHOLD = 0.8
+        face_service.LIVENESS_MODEL = "minifasnet"
+        main.check_liveness = face_service.check_liveness
+        main.image_bytes_to_face_embeddings = lambda _image: self.fail("Recognition should not run when liveness is unavailable")
+
+        result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+
+        self.assertEqual(result["status"], "spoof")
+        self.assertEqual(result["message"], "Liveness model is not available.")
+        self.assertIsNone(result["liveness_score"])
+        self.assertEqual(result["confidence"], -1.0)
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["face_count"], 0)
+        self.assertIsNotNone(result["audit_id"])
+        audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
+        self.assertEqual(audit.status, "spoof")
+
     def test_recognize_returns_multi_face_results_with_backward_compatible_top_level(self):
         session = self.add_session()
         first_student = self.add_student(student_code="63123456", class_name="63LFW")
@@ -283,6 +311,26 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertIsNone(result["results"][2]["class_name"])
         self.assertIsNone(result["results"][2]["liveness_score"])
         self.assertEqual(result["results"][2]["bbox"], {"x": 3, "y": 3, "w": 10, "h": 10})
+
+    def test_invalid_liveness_threshold_env_falls_back_without_import_crash(self):
+        original_env = os.environ.get("LIVENESS_THRESHOLD")
+        original_enabled_env = os.environ.get("ENABLE_LIVENESS")
+        os.environ["LIVENESS_THRESHOLD"] = "not-a-float"
+        os.environ["ENABLE_LIVENESS"] = "false"
+        try:
+            reloaded = importlib.reload(face_service)
+            self.assertEqual(reloaded.LIVENESS_THRESHOLD, 0.8)
+            self.assertEqual(reloaded.check_liveness(b"image")["label"], "disabled")
+        finally:
+            if original_env is None:
+                os.environ.pop("LIVENESS_THRESHOLD", None)
+            else:
+                os.environ["LIVENESS_THRESHOLD"] = original_env
+            if original_enabled_env is None:
+                os.environ.pop("ENABLE_LIVENESS", None)
+            else:
+                os.environ["ENABLE_LIVENESS"] = original_enabled_env
+            importlib.reload(face_service)
 
 
 if __name__ == "__main__":

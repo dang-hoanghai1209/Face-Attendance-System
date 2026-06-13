@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from PIL import UnidentifiedImageError
 import uvicorn
 
@@ -64,6 +65,9 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "data", "embedding_db.pkl")
 MODEL_TEST_LOG_PATH = Path(BASE_DIR) / "reports" / "model_test_log.csv"
+MEDIA_DIR = Path(BASE_DIR) / "media"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 
 legacy_embeddings = {}
 

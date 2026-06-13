@@ -25,6 +25,8 @@ class AttendanceCheckIn(BaseModel):
     gps_lng: Optional[float] = None
     gps_accuracy: Optional[float] = None
     liveness_passed: Optional[bool] = None
+    liveness_score: Optional[float] = None
+    recognition_status: Optional[str] = None
 
 
 class AttendanceCheckOut(BaseModel):
@@ -61,6 +63,8 @@ def _checkin_response(db: Session, data: AttendanceCheckIn):
             gps_lng=data.gps_lng,
             gps_accuracy=data.gps_accuracy,
             liveness_passed=data.liveness_passed,
+            liveness_score=data.liveness_score,
+            recognition_status=data.recognition_status,
         )
     except HTTPException as exc:
         if isinstance(exc.detail, dict) and exc.detail.get("status"):

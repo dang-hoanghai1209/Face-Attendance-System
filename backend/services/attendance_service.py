@@ -11,6 +11,8 @@ from models.enrollment import Enrollment
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
+from face_service import THRESHOLD_UNCERTAIN
+from services.security_alert_service import create_alert
 from services.timezone_service import now_in_app_timezone
 
 
@@ -84,6 +86,54 @@ def _get_student_and_session_base(db: Session, student_code: str, session_id: in
         raise HTTPException(status_code=400, detail="Buổi học chưa được gán lớp.")
 
     return student, session
+
+
+def get_session_or_404(db: Session, session_id: int):
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Không tìm thấy buổi học.")
+    return session
+
+
+def _is_student_enrolled_in_session(db: Session, student: Student, session: ClassSession):
+    return (
+        db.query(Enrollment)
+        .filter(
+            Enrollment.session_id == session.id,
+            Enrollment.student_id == student.id,
+        )
+        .first()
+        is not None
+    )
+
+
+def _is_legacy_enrolled_or_class_match(db: Session, student: Student, session: ClassSession):
+    if session.section_id:
+        return (
+            db.query(Enrollment)
+            .filter(
+                Enrollment.course_section_id == session.section_id,
+                Enrollment.student_id == student.id,
+                Enrollment.status == "active",
+            )
+            .first()
+            is not None
+        )
+    return student.class_name == session.class_name
+
+
+def _security_alert_response(status: str, message: str, alert):
+    return {
+        "status": status,
+        "message": message,
+        "alert_id": alert.id,
+        "alert_type": alert.alert_type,
+        "session_id": alert.session_id,
+        "student_id": alert.student_id,
+        "confidence": alert.confidence,
+        "liveness_score": alert.liveness_score,
+        "captured_img": alert.captured_img,
+    }
 
 
 def get_student_and_session(db: Session, student_code: str, session_id: int):
@@ -370,13 +420,128 @@ def record_checkin(
     gps_lng=None,
     gps_accuracy=None,
     liveness_passed=None,
+    liveness_score=None,
+    recognition_status=None,
 ):
-    student, session = get_student_and_session(db, student_code, session_id)
-    existing = get_session_record(db, student.id, session_id)
+    session = get_session_or_404(db, session_id)
+    normalized_recognition_status = (recognition_status or "").lower()
+
+    if liveness_passed is False:
+        alert = create_alert(
+            db,
+            session_id=session_id,
+            alert_type="SPOOF",
+            captured_img=image_path,
+            confidence=confidence,
+            liveness_score=liveness_score,
+            gps_lat=gps_lat,
+            gps_lng=gps_lng,
+            note="Liveness check failed during attendance check-in.",
+        )
+        return _security_alert_response(
+            "spoof",
+            "Xác minh liveness thất bại.",
+            alert,
+        )
+
+    if normalized_recognition_status == "unknown" or (
+        confidence is not None and confidence < THRESHOLD_UNCERTAIN
+    ):
+        alert = create_alert(
+            db,
+            session_id=session_id,
+            alert_type="UNKNOWN_FACE",
+            captured_img=image_path,
+            confidence=confidence,
+            liveness_score=liveness_score,
+            gps_lat=gps_lat,
+            gps_lng=gps_lng,
+            note="Unknown face during attendance check-in.",
+        )
+        return _security_alert_response(
+            "unknown",
+            "Không nhận diện được sinh viên.",
+            alert,
+        )
+
+    student = db.query(Student).filter(Student.student_code == student_code).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Không tìm thấy sinh viên.")
+
+    if not student.class_name:
+        raise HTTPException(status_code=400, detail="Sinh viên chưa được gán lớp.")
+    if not session.class_name:
+        raise HTTPException(status_code=400, detail="Buổi học chưa được gán lớp.")
+
+    block_reason = official_attendance_block_reason(student)
+    if block_reason:
+        raise HTTPException(status_code=403, detail=block_reason)
+
+    session_enrollment_count = validate_min_session_enrollments(db, session)
+    if session_enrollment_count > 0:
+        if not _is_student_enrolled_in_session(db, student, session):
+            alert = create_alert(
+                db,
+                session_id=session_id,
+                alert_type="NOT_ENROLLED",
+                student_id=student.id,
+                captured_img=image_path,
+                confidence=confidence,
+                liveness_score=liveness_score,
+                gps_lat=gps_lat,
+                gps_lng=gps_lng,
+                note="Recognized student is not enrolled in this session.",
+            )
+            return _security_alert_response(
+                "not_enrolled",
+                "Sinh viên chưa được đăng ký cho buổi học này.",
+                alert,
+            )
+    else:
+        if not _is_legacy_enrolled_or_class_match(db, student, session):
+            if session.section_id:
+                attendance_error(
+                    403,
+                    "not_enrolled",
+                    "Bạn không có trong danh sách đăng ký của lớp học phần này.",
+                )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "reason": "class_mismatch",
+                    "code": CROSS_CLASS_LEGACY_CODE,
+                    "message": cross_class_attendance_message(student.class_name, session.class_name),
+                    "student_class": student.class_name,
+                    "session_class": session.class_name,
+                },
+            )
 
     check_in_at = now_in_app_timezone()
-    validate_min_session_enrollments(db, session)
-    validate_checkin_window(session, check_in_at)
+    try:
+        validate_checkin_window(session, check_in_at)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        if session_enrollment_count > 0 and detail.get("status") in {"not_started", "attendance_closed"}:
+            alert = create_alert(
+                db,
+                session_id=session_id,
+                alert_type="LATE_ENTRY",
+                student_id=student.id,
+                captured_img=image_path,
+                confidence=confidence,
+                liveness_score=liveness_score,
+                gps_lat=gps_lat,
+                gps_lng=gps_lng,
+                note=detail.get("message"),
+            )
+            return _security_alert_response(
+                "late_entry",
+                detail.get("message") or "Ngoài cửa sổ điểm danh.",
+                alert,
+            )
+        raise
+
+    existing = get_session_record(db, student.id, session_id)
     gps_data = validate_gps(db, session, gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy=gps_accuracy) or {}
 
     if existing:
@@ -444,6 +609,8 @@ def record_checkin(
                 gps_lng=gps_lng,
                 gps_accuracy=gps_accuracy,
                 liveness_passed=liveness_passed,
+                liveness_score=liveness_score,
+                recognition_status=recognition_status,
             )
         raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
     db.refresh(record)

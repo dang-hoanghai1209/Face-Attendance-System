@@ -17,17 +17,22 @@ export const attendanceStatusLabels = {
 
 export const dataSourceLabels = {
   real: 'Dữ liệu thật',
-  demo: 'Dữ liệu minh họa',
-  kaggle: 'Dữ liệu kiểm thử Kaggle',
-  lfw: 'Dữ liệu kiểm thử LFW',
+  demo: 'Dữ liệu demo',
+  kaggle: 'Dữ liệu đánh giá Kaggle',
+  lfw: 'Dữ liệu đánh giá LFW',
+  evaluation: 'Dữ liệu đánh giá',
 }
 
 export const registrationMethodLabels = {
   camera: 'Đăng ký bằng camera',
   upload: 'Tải ảnh lên',
   import: 'Nhập từ bộ dữ liệu',
+  face_register: 'Đăng ký khuôn mặt',
+  evaluation_import: 'Nhập dữ liệu đánh giá',
+  demo_seed: 'Dữ liệu demo/seed',
   webcam_mean: 'Đăng ký bằng camera',
   lfw_folder_mean: 'Nhập từ bộ dữ liệu LFW',
+  lfw_import: 'Nhập dữ liệu LFW',
 }
 
 export const roleLabels = {

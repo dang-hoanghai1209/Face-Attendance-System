@@ -438,6 +438,35 @@ def sync_schema(engine):
             connection.execute(
                 text("UPDATE students SET is_demo = FALSE WHERE is_demo IS NULL")
             )
+            connection.execute(
+                text(
+                    """
+                    UPDATE students
+                    SET data_source = 'lfw',
+                        is_demo = TRUE,
+                        registration_method = COALESCE(NULLIF(registration_method, ''), 'lfw_import')
+                    WHERE UPPER(COALESCE(class_name, '')) LIKE '%LFW%'
+                       OR LOWER(COALESCE(data_source, '')) IN ('lfw', 'evaluation', 'kaggle')
+                       OR LOWER(COALESCE(registration_method, '')) IN ('lfw_import', 'evaluation_import', 'lfw_folder_mean')
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE students
+                    SET data_source = 'demo',
+                        is_demo = TRUE,
+                        registration_method = COALESCE(NULLIF(registration_method, ''), 'demo_seed')
+                    WHERE data_source = 'real'
+                      AND (
+                          LOWER(COALESCE(full_name, '')) LIKE '%demo%'
+                          OR LOWER(COALESCE(full_name, '')) LIKE '%mvp%'
+                          OR LOWER(COALESCE(registration_method, '')) LIKE '%demo%'
+                      )
+                    """
+                )
+            )
 
             if "face_embeddings" in tables:
                 connection.execute(

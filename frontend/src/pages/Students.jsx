@@ -2,11 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import api from '../../api/axios.js'
 import { VALID_CLASSES, classMatchesStudentCode } from '../constants/classes.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
-import { dataSourceLabels } from '../utils/displayLabels.js'
+import { dataSourceLabels, registrationMethodLabels } from '../utils/displayLabels.js'
 
 const CODE_RE = /^(63|64)\d{6}$/
 const SOURCE_LABELS = dataSourceLabels
-const SOURCE_BADGES = { real: 'success', kaggle: 'warning', demo: 'danger' }
+const SOURCE_BADGES = { real: 'success', kaggle: 'warning', lfw: 'warning', evaluation: 'warning', demo: 'danger' }
+const DATA_TABS = [
+  { key: 'real', label: 'Sinh viên thật' },
+  { key: 'evaluation', label: 'Dữ liệu đánh giá' },
+  { key: 'demo', label: 'Dữ liệu demo' },
+]
 
 const emptyForm = { student_code: '', full_name: '', class_name: '' }
 const emptyErrors = { student_code: '', full_name: '', class_name: '' }
@@ -32,6 +37,49 @@ function validateForm(form) {
 
 const hasErrors = (errors) => Object.values(errors).some(Boolean)
 
+const normalizeText = (value) => String(value || '').trim().toLowerCase()
+const isLfwLikeStudent = (student) => {
+  const source = normalizeText(student.data_source)
+  const method = normalizeText(student.registration_method)
+  const className = normalizeText(student.class_name)
+  const fullName = normalizeText(student.full_name)
+  const code = normalizeText(student.student_code)
+  return (
+    ['lfw', 'evaluation', 'kaggle'].includes(source) ||
+    ['lfw_import', 'evaluation_import', 'lfw_folder_mean'].includes(method) ||
+    className.includes('lfw') ||
+    code.includes('lfw') ||
+    fullName.includes('lfw')
+  )
+}
+
+const isDemoLikeStudent = (student) => {
+  if (isLfwLikeStudent(student)) return false
+  const source = normalizeText(student.data_source)
+  const method = normalizeText(student.registration_method)
+  const fullName = normalizeText(student.full_name)
+  return (
+    student.is_demo === true ||
+    source === 'demo' ||
+    method.includes('demo') ||
+    fullName.includes('demo') ||
+    fullName.includes('mvp')
+  )
+}
+
+const studentDataGroup = (student) => {
+  if (isLfwLikeStudent(student)) return 'evaluation'
+  if (isDemoLikeStudent(student)) return 'demo'
+  return 'real'
+}
+
+const sortRealStudentsFirst = (left, right) => {
+  const leftReady = left.face_status === 'registered' || left.registration_method === 'face_register'
+  const rightReady = right.face_status === 'registered' || right.registration_method === 'face_register'
+  if (leftReady !== rightReady) return leftReady ? -1 : 1
+  return String(left.full_name || '').localeCompare(String(right.full_name || ''), 'vi')
+}
+
 function Field({ label, error, children }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
@@ -48,6 +96,7 @@ export default function Students() {
   const [errors, setErrors] = useState(emptyErrors)
   const [editingId, setEditingId] = useState(null)
   const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState('real')
   const [classFilter, setClassFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [faceFilter, setFaceFilter] = useState('all')
@@ -87,16 +136,28 @@ export default function Students() {
     return students.filter((s) => {
       const source = s.data_source || 'real'
       const faceStatus = s.face_status === 'registered' ? 'registered' : 'unregistered'
+      const group = studentDataGroup(s)
       const matchesSearch = !kw ||
         s.student_code?.toLowerCase().includes(kw) ||
         s.full_name?.toLowerCase().includes(kw) ||
         s.class_name?.toLowerCase().includes(kw)
+      const matchesTab = group === activeTab
       const matchesClass = classFilter === 'all' || s.class_name === classFilter
       const matchesSource = sourceFilter === 'all' || source === sourceFilter
       const matchesFace = faceFilter === 'all' || faceStatus === faceFilter
-      return matchesSearch && matchesClass && matchesSource && matchesFace
-    })
-  }, [students, search, classFilter, sourceFilter, faceFilter])
+      return matchesTab && matchesSearch && matchesClass && matchesSource && matchesFace
+    }).sort(activeTab === 'real'
+      ? sortRealStudentsFirst
+      : (left, right) => String(left.full_name || '').localeCompare(String(right.full_name || ''), 'vi'))
+  }, [students, search, activeTab, classFilter, sourceFilter, faceFilter])
+
+  const groupCounts = useMemo(() => {
+    return students.reduce((counts, student) => {
+      const group = studentDataGroup(student)
+      counts[group] = (counts[group] || 0) + 1
+      return counts
+    }, { real: 0, evaluation: 0, demo: 0 })
+  }, [students])
 
   const resetForm = () => {
     setForm(emptyForm)
@@ -216,6 +277,19 @@ export default function Students() {
             </select>
           </Field>
         </div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
+          {DATA_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              className={activeTab === tab.key ? '' : 'secondary'}
+              onClick={() => setActiveTab(tab.key)}
+              type="button"
+              style={{ minHeight:34, padding:'6px 12px' }}
+            >
+              {tab.label} ({groupCounts[tab.key] || 0})
+            </button>
+          ))}
+        </div>
         <div className="toolbar">
           <button onClick={handleSubmit} disabled={loading}>
             {loading ? 'Đang lưu...' : editingId ? 'Cập nhật' : 'Thêm'}
@@ -234,8 +308,10 @@ export default function Students() {
           <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} style={{ minWidth:130 }}>
             <option value="all">Tất cả nguồn</option>
             <option value="real">Dữ liệu thật</option>
-            <option value="kaggle">Dữ liệu kiểm thử Kaggle</option>
-            <option value="demo">Dữ liệu minh họa</option>
+            <option value="lfw">Dữ liệu đánh giá LFW</option>
+            <option value="evaluation">Dữ liệu đánh giá</option>
+            <option value="kaggle">Dữ liệu đánh giá Kaggle</option>
+            <option value="demo">Dữ liệu demo</option>
           </select>
           <select value={faceFilter} onChange={(e) => setFaceFilter(e.target.value)} style={{ minWidth:160 }}>
             <option value="all">Tất cả khuôn mặt</option>
@@ -277,7 +353,13 @@ export default function Students() {
                 </td>
               </tr>
             ) : filtered.map((student) => {
+              const group = studentDataGroup(student)
               const source = student.data_source || 'real'
+              const effectiveSource = group === 'evaluation' && source === 'real'
+                ? 'evaluation'
+                : group === 'demo' && source === 'real'
+                  ? 'demo'
+                  : source
               return (
                 <tr key={student.id}>
                   <td><span style={{ fontFamily:'var(--mono)', fontSize:12, color:'var(--teal)' }}>{student.student_code}</span></td>
@@ -286,9 +368,24 @@ export default function Students() {
                     <span style={{ fontFamily:'var(--mono)', fontSize:12, padding:'2px 8px', borderRadius:6, background:'var(--card2)', color:'var(--white2)' }}>{student.class_name || '-'}</span>
                   </td>
                   <td>
-                    <span className={`badge ${SOURCE_BADGES[source] || 'danger'}`}>
-                      {SOURCE_LABELS[source] || source}
+                    <span className={`badge ${SOURCE_BADGES[effectiveSource] || 'danger'}`}>
+                      {SOURCE_LABELS[effectiveSource] || effectiveSource}
                     </span>
+                    {group === 'evaluation' && (
+                      <span className="badge danger" style={{ marginLeft:6 }}>
+                        Không dùng cho điểm danh thật
+                      </span>
+                    )}
+                    {group === 'demo' && (
+                      <span className="badge warning" style={{ marginLeft:6 }}>
+                        Demo/test
+                      </span>
+                    )}
+                    {student.registration_method && (
+                      <div style={{ marginTop:4, fontSize:11, color:'var(--muted)' }}>
+                        {registrationMethodLabels[student.registration_method] || student.registration_method}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <span className={`badge ${student.face_status === 'registered' ? 'success' : 'warning'}`}>
@@ -316,7 +413,13 @@ export default function Students() {
           </div>
         ) : (
           filtered.map((student) => {
+            const group = studentDataGroup(student)
             const source = student.data_source || 'real'
+            const effectiveSource = group === 'evaluation' && source === 'real'
+              ? 'evaluation'
+              : group === 'demo' && source === 'real'
+                ? 'demo'
+                : source
             return (
               <div key={student.id} className="mobile-card">
                 <div className="mobile-card-header">
@@ -337,10 +440,22 @@ export default function Students() {
                 </div>
                 <div className="mobile-card-row">
                   <span className="mobile-card-label">Nguồn:</span>
-                  <span className={`badge ${SOURCE_BADGES[source] || 'danger'}`}>
-                    {SOURCE_LABELS[source] || source}
+                  <span className={`badge ${SOURCE_BADGES[effectiveSource] || 'danger'}`}>
+                    {SOURCE_LABELS[effectiveSource] || effectiveSource}
                   </span>
                 </div>
+                {group === 'evaluation' && (
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Ghi chú:</span>
+                    <span className="badge danger">Không dùng cho điểm danh thật</span>
+                  </div>
+                )}
+                {group === 'demo' && (
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Ghi chú:</span>
+                    <span className="badge warning">Demo/test</span>
+                  </div>
+                )}
                 <div className="mobile-card-actions">
                   <button className="secondary" onClick={() => handleEdit(student)} disabled={loading}>
                     Sửa

@@ -44,6 +44,24 @@ class StudentRouteTests(unittest.TestCase):
 
         self.assertEqual(student.class_name, "64CNTT")
 
+    def test_create_student_accepts_lfw_evaluation_metadata(self):
+        student = create_student(
+            StudentBase(
+                student_code="63123457",
+                full_name="Evaluation Sample",
+                class_name="63CNTT",
+                data_source="lfw",
+                registration_method="lfw_import",
+                is_demo=True,
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        self.assertEqual(student.data_source, "lfw")
+        self.assertEqual(student.registration_method, "lfw_import")
+        self.assertTrue(student.is_demo)
+
 
 if __name__ == "__main__":
     unittest.main()

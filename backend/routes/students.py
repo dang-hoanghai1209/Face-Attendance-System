@@ -28,8 +28,8 @@ router = APIRouter(prefix="/students", tags=["Students"])
 #  Các hằng số validation                                            #
 # ------------------------------------------------------------------ #
 VALID_CLASSES = VALID_CLASS_SET
-VALID_DATA_SOURCES = {"real", "demo", "kaggle"}
-VALID_REGISTRATION_METHODS = {"camera", "upload", "import"}
+VALID_DATA_SOURCES = {"real", "demo", "kaggle", "lfw", "evaluation"}
+VALID_REGISTRATION_METHODS = {"camera", "upload", "import", "face_register", "lfw_import", "evaluation_import", "demo_seed"}
 
 # Mã SV hợp lệ: bắt đầu bằng 63 hoặc 64, tiếp theo là đúng 6 chữ số.
 # Tổng 8 ký tự: "63"/"64" + 6 số bất kỳ.
@@ -91,8 +91,8 @@ class StudentBase(BaseModel):
     student_code: str
     full_name: str
     class_name: Optional[str] = None
-    data_source: Literal["real", "demo", "kaggle"] = "real"
-    registration_method: Optional[Literal["camera", "upload", "import"]] = None
+    data_source: Literal["real", "demo", "kaggle", "lfw", "evaluation"] = "real"
+    registration_method: Optional[Literal["camera", "upload", "import", "face_register", "lfw_import", "evaluation_import", "demo_seed"]] = None
     is_demo: bool = False
 
     @field_validator("student_code")
@@ -120,8 +120,8 @@ class StudentUpdate(BaseModel):
     student_code: Optional[str] = None
     full_name: Optional[str] = None
     class_name: Optional[str] = None
-    data_source: Optional[Literal["real", "demo", "kaggle"]] = None
-    registration_method: Optional[Literal["camera", "upload", "import"]] = None
+    data_source: Optional[Literal["real", "demo", "kaggle", "lfw", "evaluation"]] = None
+    registration_method: Optional[Literal["camera", "upload", "import", "face_register", "lfw_import", "evaluation_import", "demo_seed"]] = None
     is_demo: Optional[bool] = None
 
     @field_validator("student_code")

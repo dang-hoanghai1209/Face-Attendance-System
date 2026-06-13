@@ -40,8 +40,8 @@ def list_images(student_dir):
 def get_or_create_student(db, student_code):
     student = db.query(Student).filter(Student.student_code == student_code).first()
     if student:
-        student.data_source = "kaggle"
-        student.registration_method = "import"
+        student.data_source = "lfw"
+        student.registration_method = "lfw_import"
         student.is_demo = True
         db.commit()
         return student
@@ -51,8 +51,8 @@ def get_or_create_student(db, student_code):
         full_name=student_code.replace("_", " "),
         class_name=CLASS_NAME,
         face_status="unregistered",
-        data_source="kaggle",
-        registration_method="import",
+        data_source="lfw",
+        registration_method="lfw_import",
         is_demo=True,
     )
     db.add(student)
@@ -121,8 +121,8 @@ def register_student_from_folder(db, student_dir):
         mean_embedding = aggregate_embeddings(embeddings)
         replace_student_embeddings(db, student.id, [mean_embedding], source="lfw_folder_mean")
         student.face_status = "registered"
-        student.data_source = "kaggle"
-        student.registration_method = "import"
+        student.data_source = "lfw"
+        student.registration_method = "lfw_import"
         student.is_demo = True
         db.commit()
 

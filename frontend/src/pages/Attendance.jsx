@@ -28,6 +28,7 @@ const recognitionMessages = {
   unknown:  'Không nhận diện được sinh viên.',
   no_face:  'Không phát hiện khuôn mặt trong ảnh.',
   multiple_faces: 'Phát hiện nhiều khuôn mặt trong ảnh.',
+  spoof: 'Phát hiện ảnh giả mạo hoặc không hợp lệ (Spoof).',
 }
 const OFFICIAL_BLOCK_MESSAGE = 'Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức.'
 
@@ -40,6 +41,7 @@ const getStyle = (status) => {
   if (status === 'uncertain') return { bg: 'rgba(245,158,11,.14)', border: 'rgba(245,158,11,.45)', accent: '#fbbf24', text: '#f8fafc', muted: '#fde68a', label: 'Chưa đủ độ tin cậy' }
   if (status === 'no_face')   return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Không phát hiện khuôn mặt' }
   if (status === 'multiple_faces') return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Phát hiện nhiều khuôn mặt' }
+  if (status === 'spoof')     return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Xác thực ảnh thật thất bại (Spoof)' }
   return                             { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Không nhận diện được' }
 }
 
@@ -74,6 +76,7 @@ export default function Attendance() {
   const canDeleteAttendance = isLecturerOrAdmin
   const videoRef  = useRef(null)
   const canvasRef = useRef(null)
+  const overlayCanvasRef = useRef(null)
 
   const [stream,             setStream]             = useState(null)
   const [sessions,           setSessions]           = useState([])
@@ -228,6 +231,69 @@ export default function Attendance() {
     }
   }, [testPreviewUrl])
 
+  // Cleanup canvas overlay on unmount
+  useEffect(() => {
+    return () => {
+      const canvas = overlayCanvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+      }
+    }
+  }, [])
+
+  const drawBoundingBoxes = (results) => {
+    const canvas = overlayCanvasRef.current
+    if (!canvas || !videoRef.current) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    // Set canvas internal resolution to match video native resolution
+    canvas.width = videoRef.current.videoWidth || 640
+    canvas.height = videoRef.current.videoHeight || 480
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    if (!results || results.length === 0) return
+
+    results.forEach((face) => {
+      const bbox = face.bbox
+      if (!bbox) return
+
+      let color = '#9ca3af' // grey
+      if (face.status === 'success') {
+        color = '#00c9a7' // xanh (teal)
+      } else if (face.status === 'uncertain') {
+        color = '#fbbf24' // vàng (amber)
+      } else if (face.status === 'spoof') {
+        color = '#f43f5e' // đỏ (red)
+      }
+
+      ctx.strokeStyle = color
+      ctx.lineWidth = Math.max(3, Math.round(canvas.width / 250))
+      ctx.strokeRect(bbox.x, bbox.y, bbox.w, bbox.h)
+
+      const name = face.full_name || face.student_code || 'Unknown'
+      const conf = face.confidence ? ` (${(face.confidence * 100).toFixed(0)}%)` : ''
+      const labelText = `${name}${conf}`
+
+      ctx.fillStyle = color
+      const fontSize = Math.max(14, Math.round(canvas.width / 35))
+      ctx.font = `bold ${fontSize}px sans-serif`
+
+      const textWidth = ctx.measureText(labelText).width
+      const padding = 8
+      const rectX = bbox.x
+      const rectY = Math.max(0, bbox.y - fontSize - padding)
+      const rectW = textWidth + padding * 2
+      const rectH = fontSize + padding
+
+      ctx.fillRect(rectX, rectY, rectW, rectH)
+
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(labelText, bbox.x + padding, rectY + fontSize - 2)
+    })
+  }
+
   // ── Camera ────────────────────────────────────────────────────── //
   const startCamera = async () => {
     try {
@@ -247,6 +313,11 @@ export default function Attendance() {
   const stopCamera = () => {
     stream?.getTracks().forEach((t) => t.stop())
     setStream(null)
+    const canvas = overlayCanvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext('2d')
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
   }
 
   // ── Điểm danh ────────────────────────────────────────────────── //
@@ -325,6 +396,13 @@ export default function Attendance() {
     setLoading(true)
     setPendingRecognition(null)
 
+    // Clear old bounding boxes
+    const canvasOverlay = overlayCanvasRef.current
+    if (canvasOverlay) {
+      const ctx = canvasOverlay.getContext('2d')
+      if (ctx) ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height)
+    }
+
     const canvas  = canvasRef.current
     const context = canvas.getContext('2d')
     canvas.width  = videoRef.current.videoWidth
@@ -362,9 +440,34 @@ export default function Attendance() {
           requires_manual_confirmation,
           reason,
           official_attendance_warning_code,
+          results,
+          face_count,
         } = recRes.data
         const recognizedStudent = student || null
         const recognizedCode = recognizedStudent?.student_code || student_code
+
+        // Draw bounding boxes on overlay canvas (fallback compatible with legacy endpoints)
+        const activeResults = results || (recognizedCode ? [{
+          student_code: recognizedCode,
+          full_name: recognizedStudent?.full_name || recRes.data.full_name,
+          class_name: recognizedStudent?.class_name,
+          confidence,
+          status,
+          bbox: null
+        }] : [])
+
+        if (activeResults.length > 0) {
+          drawBoundingBoxes(activeResults)
+        }
+
+        if (status === 'spoof') {
+          setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
+            confidence: confidence || 0, message: msg || 'Xác thực sinh trắc học (ảnh thật) thất bại.' })
+          setMessage(msg || 'Xác thực sinh trắc học thất bại. Vui lòng thử lại với camera trực tiếp.')
+          if (window.innerWidth < 768) setMobileStep(4)
+          return
+        }
+
         const classMismatch = isClassMismatchRecognition({
           reason,
           official_attendance_warning_code,
@@ -614,6 +717,10 @@ export default function Attendance() {
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
                 <canvas ref={canvasRef} style={{ display: 'none' }} />
+                <canvas
+                  ref={overlayCanvasRef}
+                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', zIndex: 10 }}
+                />
                 {!stream && (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.8)' }}>
                     <button onClick={startCamera} style={{ minHeight: 48 }}>Bật Camera</button>
@@ -833,11 +940,17 @@ export default function Attendance() {
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 16 }}>
               {/* Camera + nhận diện */}
               <div className="panel panel-pad">
-                <video
-                  ref={videoRef} autoPlay playsInline
-                  style={{ width: '100%', maxWidth: 760, background: '#000', borderRadius: 8, display: 'block' }}
-                />
-                <canvas ref={canvasRef} style={{ display: 'none' }} />
+                <div style={{ position: 'relative', width: '100%', maxWidth: 760, background: '#000', borderRadius: 8, overflow: 'hidden' }}>
+                  <video
+                    ref={videoRef} autoPlay playsInline
+                    style={{ width: '100%', display: 'block' }}
+                  />
+                  <canvas ref={canvasRef} style={{ display: 'none' }} />
+                  <canvas
+                    ref={overlayCanvasRef}
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 10 }}
+                  />
+                </div>
 
                 <div className="toolbar" style={{ marginTop: 12 }}>
                   <button onClick={startCamera}>Bật camera</button>

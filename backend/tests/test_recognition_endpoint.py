@@ -24,12 +24,14 @@ class RecognitionEndpointTests(unittest.TestCase):
         Base.metadata.create_all(bind=engine)
         self.db = SessionLocal()
         self.original_image_bytes_to_embedding = main.image_bytes_to_embedding
+        self.original_image_bytes_to_face_embeddings = main.image_bytes_to_face_embeddings
         self.original_count_faces = main.count_faces_in_image_bytes
         self.original_fetch_db_embeddings = main.fetch_db_embeddings
         self.original_match_embedding = main.match_embedding
 
     def tearDown(self):
         main.image_bytes_to_embedding = self.original_image_bytes_to_embedding
+        main.image_bytes_to_face_embeddings = self.original_image_bytes_to_face_embeddings
         main.count_faces_in_image_bytes = self.original_count_faces
         main.fetch_db_embeddings = self.original_fetch_db_embeddings
         main.match_embedding = self.original_match_embedding
@@ -86,6 +88,9 @@ class RecognitionEndpointTests(unittest.TestCase):
         session = self.add_session()
         main.count_faces_in_image_bytes = lambda _image: 1
         main.image_bytes_to_embedding = lambda _image: torch.zeros(512)
+        main.image_bytes_to_face_embeddings = lambda _image: [
+            {"embedding": torch.zeros(512), "bbox": {"x": 1, "y": 2, "w": 3, "h": 4}}
+        ]
         main.fetch_db_embeddings = lambda _db: []
 
         with self.assertRaises(HTTPException) as ctx:
@@ -108,6 +113,9 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.add_student(student_code="63123456", class_name="63LFW")
         main.count_faces_in_image_bytes = lambda _image: 1
         main.image_bytes_to_embedding = lambda _image: torch.zeros(512)
+        main.image_bytes_to_face_embeddings = lambda _image: [
+            {"embedding": torch.zeros(512), "bbox": {"x": 1, "y": 2, "w": 3, "h": 4}}
+        ]
         main.fetch_db_embeddings = lambda _db: [object()]
         main.match_embedding = lambda *_args, **_kwargs: ("success", "63123456", 0.91)
 
@@ -137,6 +145,9 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.add_student(student_code="63123456", class_name="63LFW")
         main.count_faces_in_image_bytes = lambda _image: 1
         main.image_bytes_to_embedding = lambda _image: torch.zeros(512)
+        main.image_bytes_to_face_embeddings = lambda _image: [
+            {"embedding": torch.zeros(512), "bbox": {"x": 1, "y": 2, "w": 3, "h": 4}}
+        ]
         main.fetch_db_embeddings = lambda _db: [object()]
         main.match_embedding = lambda *_args, **_kwargs: ("success", "63123456", 0.91)
 
@@ -154,6 +165,37 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertIsNotNone(recognition["audit_id"])
         self.assertEqual(response["status"], "success")
         self.assertEqual(by_code["63123456"]["status"], "manual")
+
+    def test_recognize_returns_multi_face_results_with_backward_compatible_top_level(self):
+        session = self.add_session()
+        first_student = self.add_student(student_code="63123456", class_name="63LFW")
+        second_student = self.add_student(student_code="63123457", class_name="63LFW")
+        main.image_bytes_to_face_embeddings = lambda _image: [
+            {"embedding": torch.ones(512), "bbox": {"x": 10, "y": 20, "w": 30, "h": 40}},
+            {"embedding": torch.zeros(512), "bbox": {"x": 50, "y": 60, "w": 35, "h": 45}},
+        ]
+        main.fetch_db_embeddings = lambda _db: [object()]
+
+        def fake_match(embedding, *_args, **_kwargs):
+            if torch.equal(embedding, torch.ones(512)):
+                return "success", first_student.student_code, 0.93
+            return "uncertain", second_student.student_code, 0.67
+
+        main.match_embedding = fake_match
+
+        result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["student_code"], "63123456")
+        self.assertEqual(result["face_count"], 2)
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["student_code"], "63123456")
+        self.assertEqual(result["results"][0]["full_name"], "Cross Class Student")
+        self.assertEqual(result["results"][0]["class_name"], "63LFW")
+        self.assertEqual(result["results"][0]["bbox"], {"x": 10, "y": 20, "w": 30, "h": 40})
+        self.assertEqual(result["results"][1]["status"], "uncertain")
+        self.assertEqual(result["results"][1]["student_code"], "63123457")
+        self.assertEqual(self.db.query(RecognitionAttempt).count(), 2)
 
 
 if __name__ == "__main__":

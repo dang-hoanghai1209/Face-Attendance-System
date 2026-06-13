@@ -7,6 +7,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as torch_functional
 from facenet_pytorch import InceptionResnetV1, MTCNN
+from facenet_pytorch.models.mtcnn import extract_face, fixed_image_standardization
 
 from models.face_embedding import FaceEmbedding
 from models.student import Student
@@ -20,6 +21,7 @@ _embedder = None
 THRESHOLD_CONFIRM = min(max(float(os.getenv("THRESHOLD_CONFIRM", "0.75")), 0.0), 1.0)
 THRESHOLD_UNCERTAIN = min(max(float(os.getenv("THRESHOLD_UNCERTAIN", "0.60")), 0.0), 1.0)
 ENABLE_LEGACY_EMBEDDINGS = os.getenv("ENABLE_LEGACY_EMBEDDINGS", "false").lower() == "true"
+MAX_RECOGNITION_FACES = 4
 
 
 def face_models_loaded():
@@ -73,6 +75,61 @@ def image_bytes_to_embedding(image_bytes):
     with torch.inference_mode():
         embedding = embedder(face.unsqueeze(0).to(device)).detach().cpu().reshape(-1)
     return embedding
+
+
+def _bbox_from_box(box, image_size):
+    image_width, image_height = image_size
+    x1, y1, x2, y2 = [float(value) for value in box]
+    x1 = max(0.0, min(x1, image_width))
+    y1 = max(0.0, min(y1, image_height))
+    x2 = max(0.0, min(x2, image_width))
+    y2 = max(0.0, min(y2, image_height))
+    return {
+        "x": int(round(x1)),
+        "y": int(round(y1)),
+        "w": int(round(max(x2 - x1, 0.0))),
+        "h": int(round(max(y2 - y1, 0.0))),
+    }
+
+
+def image_bytes_to_face_embeddings(image_bytes, max_faces=MAX_RECOGNITION_FACES):
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    detector, embedder = get_face_models()
+    boxes, probs = detector.detect(image)
+    if boxes is None:
+        return []
+
+    face_items = []
+    for index, box in enumerate(boxes):
+        probability = probs[index] if probs is not None else 0.0
+        face_items.append((probability if probability is not None else 0.0, box))
+    face_items.sort(key=lambda item: item[0], reverse=True)
+    selected_boxes = [box for _probability, box in face_items[:max_faces]]
+    if not selected_boxes:
+        return []
+
+    face_tensors = []
+    for box in selected_boxes:
+        face = extract_face(image, box, detector.image_size, detector.margin, save_path=None)
+        if detector.post_process:
+            face = fixed_image_standardization(face)
+        face_tensors.append(face)
+    if not face_tensors:
+        return []
+    faces = torch.stack(face_tensors)
+
+    with torch.inference_mode():
+        embeddings = embedder(faces.to(device)).detach().cpu()
+
+    results = []
+    for index, box in enumerate(selected_boxes):
+        results.append(
+            {
+                "embedding": embeddings[index].reshape(-1),
+                "bbox": _bbox_from_box(box, image.size),
+            }
+        )
+    return results
 
 
 def count_faces_in_image_bytes(image_bytes):

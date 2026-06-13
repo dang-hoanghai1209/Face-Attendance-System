@@ -19,6 +19,7 @@ from face_service import (
     count_faces_in_image_bytes,
     face_models_loaded,
     fetch_db_embeddings,
+    image_bytes_to_face_embeddings,
     image_bytes_to_embedding,
     load_legacy_embeddings,
     match_embedding,
@@ -250,6 +251,25 @@ def _recognize_uploaded_face(
     save_capture: bool = True,
     audit_recognition: bool = True,
 ):
+    return _recognize_uploaded_face_multi(
+        file=file,
+        session_id=session_id,
+        official_mode=official_mode,
+        reject_multiple_faces=reject_multiple_faces,
+        save_capture=save_capture,
+        audit_recognition=audit_recognition,
+    )
+
+
+def _recognize_uploaded_face_multi(
+    *,
+    file: UploadFile,
+    session_id: Optional[int] = None,
+    official_mode: bool = True,
+    reject_multiple_faces: bool = False,
+    save_capture: bool = True,
+    audit_recognition: bool = True,
+):
     started_at = perf_counter()
     image_data = file.file.read()
     if not image_data:
@@ -271,7 +291,7 @@ def _recognize_uploaded_face(
             db.close()
 
     try:
-        if reject_multiple_faces or official_mode:
+        if reject_multiple_faces:
             face_count = count_faces_in_image_bytes(image_data)
             if face_count > 1:
                 processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
@@ -298,7 +318,7 @@ def _recognize_uploaded_face(
                         "Vui lòng dùng ảnh chỉ có một khuôn mặt."
                     ),
                 }
-        embedding = image_bytes_to_embedding(image_data)
+        detected_faces = image_bytes_to_face_embeddings(image_data)
     except UnidentifiedImageError as exc:
         raise HTTPException(status_code=400, detail="Không đọc được ảnh. Vui lòng gửi file ảnh hợp lệ.") from exc
     except Exception as exc:
@@ -319,7 +339,7 @@ def _recognize_uploaded_face(
             detail="Không xử lý được ảnh. Vui lòng kiểm tra định dạng và chất lượng ảnh.",
         ) from exc
 
-    if embedding is None:
+    if not detected_faces:
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
         audit_id = None
         if audit_recognition:
@@ -355,6 +375,8 @@ def _recognize_uploaded_face(
             "processing_ms": processing_time_ms,
             "audit_id": audit_id,
             "capture_path": capture_path,
+            "results": [],
+            "face_count": 0,
             "message": "Không phát hiện khuôn mặt trong ảnh. Vui lòng chọn ảnh rõ mặt hơn.",
         }
 
@@ -366,6 +388,87 @@ def _recognize_uploaded_face(
         )
         if not has_registered_embeddings:
             raise HTTPException(status_code=404, detail="Chưa có dữ liệu khuôn mặt đã đăng ký.")
+
+        results = []
+        for face in detected_faces:
+            recognition_status, recognized_code, similarity = match_embedding(
+                face["embedding"],
+                db_embeddings,
+                legacy_embeddings=legacy_embeddings,
+                include_legacy=ENABLE_LEGACY_EMBEDDINGS,
+            )
+            student_code = recognized_code if recognized_code != "Unknown" else None
+            student = None
+            if student_code and recognition_status in {"success", "uncertain"}:
+                student = db.query(Student).filter(Student.student_code == student_code).first()
+            student_data = _serialize_student(student)
+            official_warning = _official_attendance_warning(student) if official_mode else None
+            official_warning_code = None
+            if official_mode and not official_warning:
+                official_warning, official_warning_code = _session_membership_warning(student_data, session)
+            message = {
+                "success": "Nhận diện khuôn mặt thành công.",
+                "uncertain": "Đã phát hiện khuôn mặt nhưng chưa đủ độ tin cậy. Vui lòng xác nhận thủ công.",
+                "unknown": "Đã phát hiện khuôn mặt nhưng không nhận diện được sinh viên.",
+            }[recognition_status]
+            if official_warning:
+                message = official_warning
+            audit_id = None
+            if audit_recognition:
+                audit_status = CROSS_CLASS_REASON_CODE if official_warning_code == CROSS_CLASS_REASON_CODE else recognition_status
+                attempt = _audit_recognition_safely(
+                    db,
+                    session_id=session_id,
+                    predicted_student_code=student_code,
+                    confidence=similarity,
+                    status=audit_status,
+                    image_path=capture_path,
+                    message=message,
+                )
+                audit_id = attempt.id if attempt else None
+
+            results.append(
+                {
+                    "status": recognition_status,
+                    "student_id": student_data["id"] if student_data else None,
+                    "student_code": student_code,
+                    "sample_code": student_code,
+                    "full_name": student_data["full_name"] if student_data else None,
+                    "class_name": student_data["class_name"] if student_data else None,
+                    "data_source": student_data["data_source"] if student_data else None,
+                    "is_demo": student_data["is_demo"] if student_data else None,
+                    "registration_method": student_data["registration_method"] if student_data else None,
+                    "student": student_data,
+                    "confidence": similarity,
+                    "confidence_percent": f"{max(similarity, 0.0):.0%}",
+                    "bbox": face.get("bbox"),
+                    "official_attendance_allowed": official_warning is None and recognition_status in {"success", "uncertain"},
+                    "official_attendance_warning": official_warning,
+                    "official_attendance_warning_code": official_warning_code,
+                    "recognized": student_data is not None and recognition_status in {"success", "uncertain"},
+                    "requires_manual_confirmation": official_warning_code == CROSS_CLASS_REASON_CODE,
+                    "reason": official_warning_code,
+                    "session_id": session_id,
+                    "audit_id": audit_id,
+                    "capture_path": capture_path,
+                    "message": message,
+                }
+            )
+
+        processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
+        for result in results:
+            result["processing_time_ms"] = processing_time_ms
+            result["processing_ms"] = processing_time_ms
+        primary_result = results[0]
+        return {
+            **primary_result,
+            "session_id": session_id,
+            "processing_time_ms": processing_time_ms,
+            "processing_ms": processing_time_ms,
+            "capture_path": capture_path,
+            "results": results,
+            "face_count": len(results),
+        }
 
         recognition_status, recognized_code, similarity = match_embedding(
             embedding,

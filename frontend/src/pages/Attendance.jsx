@@ -88,6 +88,7 @@ export default function Attendance() {
   const [loading,            setLoading]            = useState(false)
   const [deletingRecordId,    setDeletingRecordId]    = useState(null)
   const [message,            setMessage]            = useState('')
+  const [alertToast,         setAlertToast]         = useState(null)
   const [mode,               setMode]               = useState('official')
   const [testFile,           setTestFile]           = useState(null)
   const [testPreviewUrl,     setTestPreviewUrl]     = useState('')
@@ -278,6 +279,16 @@ export default function Attendance() {
     }
   }, [])
 
+  // Auto-hide camera alert toast after 4 seconds
+  useEffect(() => {
+    if (!alertToast) return
+    const timer = setTimeout(() => {
+      setAlertToast(null)
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [alertToast])
+
+
   const drawBoundingBoxes = (results) => {
     const canvas = overlayCanvasRef.current
     if (!canvas || !videoRef.current) return
@@ -340,6 +351,164 @@ export default function Attendance() {
       ctx.fillStyle = '#ffffff'
       ctx.fillText(labelText, bbox.x + padding, rectY + fontSize - 2)
     })
+  }
+
+  const handleCheckinResult = (checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore) => {
+    const checkinStatus = (checkinData.status || '').toLowerCase()
+    
+    if (['spoof', 'unknown', 'not_enrolled', 'late_entry'].includes(checkinStatus)) {
+      let alertMsg = ''
+      if (checkinStatus === 'spoof') {
+        alertMsg = 'Phát hiện giả mạo khuôn mặt.'
+      } else if (checkinStatus === 'unknown') {
+        alertMsg = 'Phát hiện khuôn mặt không xác định.'
+      } else if (checkinStatus === 'not_enrolled') {
+        const svNameOrCode = recognizedStudent?.full_name || recognizedCode || 'Sinh viên'
+        alertMsg = `${svNameOrCode} không thuộc danh sách đăng ký buổi học.`
+      } else if (checkinStatus === 'late_entry') {
+        alertMsg = 'Sinh viên quét ngoài cửa sổ điểm danh.'
+      }
+      
+      setAlertToast({
+        type: checkinStatus,
+        message: alertMsg,
+        alertId: checkinData.alert_id,
+        alertType: checkinData.alert_type,
+      })
+      
+      setResult({
+        success: false,
+        status: checkinStatus,
+        studentCode: recognizedCode || 'Không xác định',
+        student: recognizedStudent,
+        confidence,
+        livenessScore: finalLivenessScore,
+        message: alertMsg,
+      })
+      setMessage(alertMsg)
+      if (window.innerWidth < 768) setMobileStep(4)
+      return true
+    }
+    return false
+  }
+
+  const handleCheckinError = (err, recognizedCode, recognizedStudent, confidence, finalLivenessScore) => {
+    const responseData = err.response?.data
+    const status = responseData?.status || responseData?.detail?.status
+    const msg = responseData?.message || responseData?.detail?.message
+    
+    if (status && ['spoof', 'unknown', 'not_enrolled', 'late_entry', 'insufficient_enrollments'].includes(status.toLowerCase())) {
+      const mappedStatus = status.toLowerCase()
+      let alertMsg = ''
+      if (mappedStatus === 'spoof') {
+        alertMsg = 'Phát hiện giả mạo khuôn mặt.'
+      } else if (mappedStatus === 'unknown') {
+        alertMsg = 'Phát hiện khuôn mặt không xác định.'
+      } else if (mappedStatus === 'not_enrolled') {
+        const svNameOrCode = recognizedStudent?.full_name || recognizedCode || 'Sinh viên'
+        alertMsg = `${svNameOrCode} không thuộc danh sách đăng ký buổi học.`
+      } else if (mappedStatus === 'late_entry') {
+        alertMsg = 'Sinh viên quét ngoài cửa sổ điểm danh.'
+      } else if (mappedStatus === 'insufficient_enrollments') {
+        alertMsg = 'Buổi học chưa đủ tối thiểu 5 sinh viên đăng ký.'
+      }
+      
+      setAlertToast({
+        type: mappedStatus,
+        message: alertMsg,
+        alertId: responseData?.alert_id || responseData?.detail?.alert_id,
+        alertType: responseData?.alert_type || responseData?.detail?.alert_type,
+      })
+      
+      setResult({
+        success: false,
+        status: mappedStatus,
+        studentCode: recognizedCode || 'Không xác định',
+        student: recognizedStudent,
+        confidence,
+        livenessScore: finalLivenessScore,
+        message: alertMsg,
+      })
+      setMessage(alertMsg)
+      if (window.innerWidth < 768) setMobileStep(4)
+      return true
+    }
+    return false
+  }
+
+  const renderAlertToast = () => {
+    if (!alertToast) return null
+
+    let bgColor = 'rgba(239, 68, 68, 0.95)'
+    let borderColor = 'rgba(239, 68, 68, 0.4)'
+    let icon = '🚨'
+    let title = 'CẢNH BÁO BẢO MẬT'
+
+    const typeLower = (alertToast.type || '').toLowerCase()
+    if (typeLower === 'spoof') {
+      bgColor = 'rgba(239, 68, 68, 0.95)'
+      borderColor = 'rgba(239, 68, 68, 0.4)'
+      icon = '🚨'
+      title = 'PHÁT HIỆN GIẢ MẠO'
+    } else if (typeLower === 'unknown' || typeLower === 'unknown_face') {
+      bgColor = 'rgba(239, 68, 68, 0.95)'
+      borderColor = 'rgba(239, 68, 68, 0.4)'
+      icon = '❓'
+      title = 'KHUÔN MẶT LẠ'
+    } else if (typeLower === 'not_enrolled') {
+      bgColor = 'rgba(249, 115, 22, 0.95)'
+      borderColor = 'rgba(249, 115, 22, 0.4)'
+      icon = '⚠️'
+      title = 'CHƯA ĐĂNG KÝ BUỔI HỌC'
+    } else if (typeLower === 'late_entry') {
+      bgColor = 'rgba(234, 179, 8, 0.95)'
+      borderColor = 'rgba(234, 179, 8, 0.4)'
+      icon = '⏳'
+      title = 'QUÉT NGOÀI KHUNG GIỜ'
+    } else if (typeLower === 'insufficient_enrollments') {
+      bgColor = 'rgba(234, 179, 8, 0.95)'
+      borderColor = 'rgba(234, 179, 8, 0.4)'
+      icon = '👥'
+      title = 'THIẾU ĐĂNG KÝ TỐI THIỂU'
+    }
+
+    return (
+      <div className="camera-alert-toast" style={{ background: bgColor, border: `1px solid ${borderColor}` }}>
+        <span style={{ fontSize: '20px', lineHeight: 1 }}>{icon}</span>
+        <div style={{ flex: 1, textAlign: 'left' }}>
+          <div style={{ fontWeight: 800, fontSize: '11px', letterSpacing: '0.05em', marginBottom: '2px', opacity: 0.9 }}>
+            {title}
+          </div>
+          <div style={{ fontSize: '13px', fontWeight: 500, lineHeight: 1.4 }}>
+            {alertToast.message}
+          </div>
+          {(alertToast.alertId || alertToast.alertType) && (
+            <div style={{ fontSize: '10px', marginTop: '4px', opacity: 0.85, fontFamily: 'monospace' }}>
+              {alertToast.alertType && `Loại cảnh báo: ${alertToast.alertType}`}
+              {alertToast.alertId && ` | Mã ID: #${alertToast.alertId}`}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setAlertToast(null)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#ffffff',
+            fontSize: '18px',
+            cursor: 'pointer',
+            padding: '2px',
+            lineHeight: 1,
+            opacity: 0.7,
+            transition: 'opacity 0.2s',
+          }}
+          onMouseEnter={(e) => e.target.style.opacity = '1'}
+          onMouseLeave={(e) => e.target.style.opacity = '0.7'}
+        >
+          &times;
+        </button>
+      </div>
+    )
   }
 
   // ── Camera ────────────────────────────────────────────────────── //
@@ -518,6 +687,7 @@ export default function Attendance() {
             ? spoofItem.liveness_score
             : liveness_score
 
+          const alertMsg = 'Phát hiện giả mạo khuôn mặt.'
           setResult({
             success: false,
             status: 'spoof',
@@ -525,9 +695,15 @@ export default function Attendance() {
             student: recognizedStudent,
             confidence: finalScore || 0,
             livenessScore: finalScore,
-            message: 'Phát hiện giả mạo khuôn mặt. Vui lòng dùng khuôn mặt thật.'
+            message: alertMsg
           })
-          setMessage('Phát hiện giả mạo khuôn mặt. Vui lòng dùng khuôn mặt thật.')
+          setMessage(alertMsg)
+          setAlertToast({
+            type: 'spoof',
+            message: alertMsg,
+            alertId: recRes.data.alert_id,
+            alertType: recRes.data.alert_type || 'SPOOF',
+          })
           if (window.innerWidth < 768) setMobileStep(4)
           return
         }
@@ -571,12 +747,25 @@ export default function Attendance() {
         }
 
         if (status === 'success' && recognizedCode) {
-          await postAttendanceAction(recognizedCode, confidence)
-          setResult({ success: true, status, studentCode: recognizedCode, student: recognizedStudent, confidence, action,
-            livenessScore: finalLivenessScore, message: `Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.` })
-          setMessage(`Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.`)
-          await loadSessionAttendance(sessionId)
-          if (window.innerWidth < 768) setMobileStep(4)
+          try {
+            const checkinRes = await postAttendanceAction(recognizedCode, confidence)
+            const checkinData = checkinRes.data
+            const isAlert = handleCheckinResult(checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore)
+            if (isAlert) {
+              return
+            }
+            setResult({ success: true, status, studentCode: recognizedCode, student: recognizedStudent, confidence, action,
+              livenessScore: finalLivenessScore, message: `Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.` })
+            setMessage(`Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.`)
+            await loadSessionAttendance(sessionId)
+            if (window.innerWidth < 768) setMobileStep(4)
+          } catch (err) {
+            const isAlert = handleCheckinError(err, recognizedCode, recognizedStudent, confidence, finalLivenessScore)
+            if (isAlert) {
+              return
+            }
+            throw err
+          }
 
         } else if (status === 'uncertain' && recognizedCode) {
           setPendingRecognition({ studentCode: recognizedCode, student: recognizedStudent, confidence, action })
@@ -586,6 +775,15 @@ export default function Attendance() {
           if (window.innerWidth < 768) setMobileStep(4)
 
         } else {
+          if (status === 'unknown' || status === 'unknown_face') {
+            const alertMsg = 'Phát hiện khuôn mặt không xác định.'
+            setAlertToast({
+              type: 'unknown',
+              message: alertMsg,
+              alertId: recRes.data.alert_id,
+              alertType: recRes.data.alert_type || 'UNKNOWN_FACE',
+            })
+          }
           setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
             confidence, livenessScore: finalLivenessScore, message: recognitionMessages[status] || msg })
           setMessage(recognitionMessages[status] || msg)
@@ -790,6 +988,7 @@ export default function Attendance() {
                   ref={overlayCanvasRef}
                   style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none', zIndex: 10 }}
                 />
+                {renderAlertToast()}
                 {!stream && (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.8)' }}>
                     <button onClick={startCamera} style={{ minHeight: 48 }}>Bật Camera</button>
@@ -1024,6 +1223,7 @@ export default function Attendance() {
                     ref={overlayCanvasRef}
                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 10 }}
                   />
+                  {renderAlertToast()}
                 </div>
 
                 <div className="toolbar" style={{ marginTop: 12 }}>

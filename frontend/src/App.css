@@ -603,3 +603,32 @@ textarea { min-height: 90px; resize: vertical; }
     width: 24px;
   }
 }
+
+/* ── Camera Alert Toast ── */
+.camera-alert-toast {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #ffffff;
+  z-index: 100;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: cameraAlertSlideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes cameraAlertSlideDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+

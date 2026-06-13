@@ -1,4 +1,4 @@
-import os
+﻿import os
 import unittest
 from datetime import date, datetime, time
 
@@ -57,6 +57,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         session = ClassSession(
             subject="AI",
             class_name=class_name,
+            latitude=12.238912,
+            longitude=109.196748,
+            radius_meters=20,
             session_date=date(2026, 5, 30),
             start_time=start_time,
             end_time=time(9, 30),
@@ -94,6 +97,10 @@ class AttendanceReportServiceTests(unittest.TestCase):
             class_name=section.section_code,
             section_id=section.id,
             classroom_id=classroom.id,
+            latitude=classroom.gps_lat,
+            longitude=classroom.gps_lng,
+            radius_meters=classroom.radius_meters,
+            room_name=classroom.name,
             session_date=date(2026, 5, 30),
             start_time=time(7, 30),
             end_time=time(9, 30),
@@ -116,9 +123,16 @@ class AttendanceReportServiceTests(unittest.TestCase):
     def test_checkin_on_time(self):
         self.add_student()
         session = self.add_session()
-        self.patch_now(datetime(2026, 5, 30, 7, 40))
+        self.patch_now(datetime(2026, 5, 30, 7, 31))
 
-        response = attendance_service.record_checkin(self.db, "63133870", session.id, confidence=0.91)
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            confidence=0.91,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
 
         self.assertEqual(response["data"]["status"], "present")
         self.assertEqual(response["data"]["check_in_conf"], 0.91)
@@ -136,22 +150,43 @@ class AttendanceReportServiceTests(unittest.TestCase):
     def test_checkin_late(self):
         self.add_student()
         session = self.add_session()
-        self.patch_now(datetime(2026, 5, 30, 7, 46))
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
+
+        self.assertEqual(response["data"]["status"], "late")
+
+    def test_checkin_rejects_after_attendance_deadline(self):
+        self.add_student()
+        session = self.add_session()
+        self.patch_now(datetime(2026, 5, 30, 7, 41))
 
         with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(self.db, "63133870", session.id)
+            attendance_service.record_checkin(
+                self.db,
+                "63133870",
+                session.id,
+                gps_lat=session.latitude,
+                gps_lng=session.longitude,
+            )
 
-        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(ctx.exception.detail["status"], "attendance_closed")
         self.assertIn("Đã quá thời gian điểm danh", ctx.exception.detail["message"])
 
     def test_checkin_rejects_before_session_start(self):
         self.add_student()
         session = self.add_session()
-        self.patch_now(datetime(2026, 5, 30, 7, 29))
+        self.patch_now(datetime(2026, 5, 30, 7, 24))
 
         with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(self.db, "63133870", session.id)
+            attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.detail["status"], "not_started")
@@ -221,13 +256,13 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(ctx.exception.detail["status"], "gps_out_of_range")
-        self.assertEqual(ctx.exception.detail["message"], "Bạn đang ở ngoài phạm vi điểm danh của phòng học.")
+        self.assertEqual(ctx.exception.detail["message"], "Ngoài phạm vi lớp học")
 
     def test_checkout_updates_existing_record(self):
         self.add_student()
         session = self.add_session()
         self.patch_now(datetime(2026, 5, 30, 7, 35))
-        attendance_service.record_checkin(self.db, "63133870", session.id)
+        attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
         self.patch_now(datetime(2026, 5, 30, 9, 25))
 
         response = attendance_service.record_checkout(self.db, "63133870", session.id, confidence=0.88)
@@ -249,8 +284,8 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.add_student("63133870", "Nguyen Van A")
         self.add_student("63133871", "Tran Van B")
         session = self.add_session()
-        self.patch_now(datetime(2026, 5, 30, 7, 35))
-        checkin_response = attendance_service.record_checkin(self.db, "63133870", session.id)
+        self.patch_now(datetime(2026, 5, 30, 7, 31))
+        checkin_response = attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
         _session, rows = report_service.build_session_report(session.id, self.db)
         by_code = {row["student_code"]: row for row in rows}
@@ -348,7 +383,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
         session = self.add_session()
 
         with self.assertRaisesRegex(Exception, "demo/Kaggle"):
-            attendance_service.record_checkin(self.db, "63133870", session.id)
+            attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
     def test_demo_student_cannot_be_manually_attended_officially(self):
         self.add_student(data_source="kaggle", is_demo=True, registration_method="import")
@@ -362,14 +397,14 @@ class AttendanceReportServiceTests(unittest.TestCase):
         session = self.add_session()
 
         with self.assertRaisesRegex(Exception, "chưa đăng ký khuôn mặt"):
-            attendance_service.record_checkin(self.db, "63133870", session.id)
+            attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
     def test_cross_class_student_requires_manual_confirmation_message(self):
         self.add_student(student_code="63133870", class_name="63TTQL")
         session = self.add_session(class_name="64TTQL")
 
         with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(self.db, "63133870", session.id)
+            attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
         detail = ctx.exception.detail
         self.assertEqual(detail["code"], "cross_class_requires_manual_confirmation")

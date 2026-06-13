@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import unittest
 from datetime import date, datetime, time
@@ -70,7 +70,7 @@ class BackendMVP1Tests(unittest.TestCase):
     def add_section_bundle(self):
         classroom = create_classroom(
             ClassroomCreate(
-                name="Phòng A101",
+                name="PhÃ²ng A101",
                 building="Khu A",
                 gps_lat=12.238912,
                 gps_lng=109.196748,
@@ -90,7 +90,7 @@ class BackendMVP1Tests(unittest.TestCase):
                 subject_id=subject.id,
                 semester="2026-1",
                 academic_year="2025-2026",
-                lecturer_name="Giảng viên MVP",
+                lecturer_name="Giáº£ng viÃªn MVP",
                 status="open",
             ),
             _current_user=None,
@@ -110,11 +110,12 @@ class BackendMVP1Tests(unittest.TestCase):
             end_time=time(9, 0),
         )
         with self.assertRaises(Exception) as ctx:
-            attendance_service.validate_checkin_window(session, datetime(2026, 6, 10, 7, 16))
+            attendance_service.validate_checkin_window(session, datetime(2026, 6, 10, 7, 11))
         self.assertEqual(ctx.exception.detail["status"], "attendance_closed")
+        self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(
             ctx.exception.detail["message"],
-            "Đã quá thời gian điểm danh. Hệ thống chỉ cho phép điểm danh trong 15 phút đầu buổi học.",
+            "Đã quá thời gian điểm danh.",
         )
 
     def test_enrollment_and_report_use_section_membership(self):
@@ -133,7 +134,7 @@ class BackendMVP1Tests(unittest.TestCase):
                 session_date=date(2026, 6, 10),
                 start_time=time(7, 0),
                 end_time=time(9, 0),
-                note="Buổi học MVP",
+                note="Buá»•i há»c MVP",
             ),
             _current_user=None,
             db=self.db,
@@ -190,7 +191,7 @@ class BackendMVP1Tests(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["session_id"], session.id)
         self.assertEqual(items[0]["status"], "open_for_attendance")
-        self.assertEqual(items[0]["attendance_deadline"], "07:15")
+        self.assertEqual(items[0]["attendance_deadline"], "07:10")
         self.assertEqual(items[0]["classroom_id"], classroom.id)
 
     def test_auth_me_returns_student_identity_for_student(self):
@@ -296,9 +297,10 @@ class BackendMVP1Tests(unittest.TestCase):
             start_time=time(7, 0),
             end_time=time(9, 0),
         )
-        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 59))[0], "not_started")
-        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 7, 15))[0], "open_for_attendance")
-        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 7, 16))[0], "closed")
+        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 54))[0], "not_started")
+        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 55))[0], "open_for_attendance")
+        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 7, 10))[0], "open_for_attendance")
+        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 7, 11))[0], "closed")
 
     def test_checkin_response_contract_for_mobile_frontend(self):
         classroom, _subject, section = self.add_section_bundle()
@@ -383,7 +385,7 @@ class BackendMVP1Tests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["status"], "gps_out_of_range")
-        self.assertEqual(payload["message"], "Bạn đang ở ngoài phạm vi điểm danh của phòng học.")
+        self.assertEqual(payload["message"], "Ngoài phạm vi lớp học")
         self.assertIn("distance_meters", payload)
         self.assertEqual(payload["allowed_radius_meters"], classroom.radius_meters)
 

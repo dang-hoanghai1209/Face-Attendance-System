@@ -16,7 +16,7 @@ from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
-from services.attendance_service import LATE_THRESHOLD_MINUTES
+from services.attendance_service import EARLY_CHECKIN_MINUTES, LATE_THRESHOLD_MINUTES
 from services.auth_service import get_current_user, require_admin, resolve_student_for_user
 from services.class_service import VALID_CLASS_SET, student_code_matches_class
 from services.timezone_service import now_in_app_timezone
@@ -158,8 +158,9 @@ def _mobile_session_status(session: ClassSession, now_value: datetime):
         return "closed", None
 
     session_start = datetime.combine(session.session_date, session.start_time)
+    attendance_open_at = session_start - timedelta(minutes=EARLY_CHECKIN_MINUTES)
     attendance_deadline = session_start + timedelta(minutes=LATE_THRESHOLD_MINUTES)
-    if now_value < session_start:
+    if now_value < attendance_open_at:
         return "not_started", attendance_deadline
     if now_value <= attendance_deadline:
         return "open_for_attendance", attendance_deadline

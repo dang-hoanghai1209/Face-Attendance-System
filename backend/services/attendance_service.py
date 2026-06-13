@@ -6,7 +6,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.attendance import Attendance
-from models.classroom import Classroom
 from models.enrollment import Enrollment
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
@@ -14,7 +13,9 @@ from models.student import Student
 from services.timezone_service import now_in_app_timezone
 
 
-LATE_THRESHOLD_MINUTES = 15
+EARLY_CHECKIN_MINUTES = 5
+PRESENT_WINDOW_MINUTES = 1
+LATE_THRESHOLD_MINUTES = 10
 ATTENDED_STATUSES = {"present", "late", "manual"}
 OFFICIAL_ATTENDANCE_BLOCK_MESSAGE = (
     "Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức."
@@ -188,8 +189,8 @@ def calculate_attendance_status(session: ClassSession, check_in_at: datetime):
         return "present"
 
     session_start = datetime.combine(session.session_date, session.start_time)
-    late_threshold = session_start + timedelta(minutes=LATE_THRESHOLD_MINUTES)
-    return "present" if check_in_at <= late_threshold else "late"
+    present_deadline = session_start + timedelta(minutes=PRESENT_WINDOW_MINUTES)
+    return "present" if check_in_at <= present_deadline else "late"
 
 
 def validate_checkin_window(session: ClassSession, check_in_at: datetime):
@@ -197,19 +198,16 @@ def validate_checkin_window(session: ClassSession, check_in_at: datetime):
         attendance_error(400, "session_time_missing", "Buổi học chưa được cấu hình thời gian bắt đầu.")
 
     session_start = datetime.combine(session.session_date, session.start_time)
+    attendance_open_at = session_start - timedelta(minutes=EARLY_CHECKIN_MINUTES)
     attendance_deadline = session_start + timedelta(minutes=LATE_THRESHOLD_MINUTES)
-    if check_in_at < session_start:
+    if check_in_at < attendance_open_at:
         attendance_error(
             400,
             "not_started",
             "Buổi học chưa bắt đầu. Vui lòng quay lại khi đến giờ học.",
         )
     if check_in_at > attendance_deadline:
-        attendance_error(
-            400,
-            "attendance_closed",
-            "Đã quá thời gian điểm danh. Hệ thống chỉ cho phép điểm danh trong 15 phút đầu buổi học.",
-        )
+        attendance_error(403, "attendance_closed", "Đã quá thời gian điểm danh.")
 
 
 def haversine_distance_meters(lat1, lng1, lat2, lng2):
@@ -222,24 +220,21 @@ def haversine_distance_meters(lat1, lng1, lat2, lng2):
 
 
 def validate_gps(db: Session, session: ClassSession, gps_lat=None, gps_lng=None, gps_accuracy=None):
-    if not session.classroom_id:
+    if session.latitude is None or session.longitude is None:
         return None
 
     if gps_lat is None or gps_lng is None:
         attendance_error(400, "gps_missing", "Vui lòng cho phép truy cập vị trí GPS để điểm danh.")
 
-    classroom = db.query(Classroom).filter(Classroom.id == session.classroom_id).first()
-    if not classroom:
-        attendance_error(400, "classroom_missing", "Buổi học chưa được cấu hình phòng học hợp lệ.")
-
-    distance_meters = haversine_distance_meters(gps_lat, gps_lng, classroom.gps_lat, classroom.gps_lng)
-    if distance_meters > classroom.radius_meters:
+    allowed_radius_meters = session.radius_meters if session.radius_meters is not None else 50
+    distance_meters = haversine_distance_meters(gps_lat, gps_lng, session.latitude, session.longitude)
+    if distance_meters > allowed_radius_meters:
         attendance_error(
             403,
             "gps_out_of_range",
-            "Bạn đang ở ngoài phạm vi điểm danh của phòng học.",
+            "Ngoài phạm vi lớp học",
             distance_meters=round(distance_meters, 2),
-            allowed_radius_meters=classroom.radius_meters,
+            allowed_radius_meters=allowed_radius_meters,
         )
 
     return {
@@ -247,7 +242,7 @@ def validate_gps(db: Session, session: ClassSession, gps_lat=None, gps_lng=None,
         "gps_lng": gps_lng,
         "gps_accuracy": gps_accuracy,
         "distance_meters": round(distance_meters, 2),
-        "allowed_radius_meters": classroom.radius_meters,
+        "allowed_radius_meters": allowed_radius_meters,
     }
 
 
@@ -295,10 +290,9 @@ def get_session_record(db: Session, student_id: int, session_id: int):
 
 
 def allowed_radius_for_session(db: Session, session: ClassSession):
-    if not session or not session.classroom_id:
+    if not session:
         return None
-    classroom = db.query(Classroom).filter(Classroom.id == session.classroom_id).first()
-    return classroom.radius_meters if classroom else None
+    return session.radius_meters
 
 
 def already_checked_in_response(record: Attendance, student: Student, session: ClassSession | None = None, db: Session | None = None):

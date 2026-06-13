@@ -106,8 +106,8 @@ export default function GPSStatus({ targetLocation, onLocationChange }) {
         statusClass = 'danger'
       }
     } else {
-      statusText = 'Đã lấy được tọa độ (Phòng học chưa cấu hình GPS)'
-      statusClass = 'success'
+      statusText = 'Buổi học chưa cấu hình tọa độ GPS'
+      statusClass = 'warning'
       isWithinRange = true // Xem như hợp lệ để quét nếu phòng học không cấu hình tọa độ
     }
   }
@@ -160,18 +160,18 @@ export default function GPSStatus({ targetLocation, onLocationChange }) {
                 </span>
               </div>
               {distance !== null && (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--muted)' }}>Khoảng cách đến phòng:</span>
-                    <span style={{ color: isWithinRange ? 'var(--teal)' : 'var(--red)', fontWeight: '700' }}>
-                      {distance.toFixed(1)} mét
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--muted)' }}>Bán kính cho phép:</span>
-                    <span style={{ color: 'var(--white2)' }}>{allowedRadius} mét</span>
-                  </div>
-                </>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--muted)' }}>Khoảng cách đến phòng:</span>
+                  <span style={{ color: isWithinRange ? 'var(--teal)' : 'var(--red)', fontWeight: '700' }}>
+                    {distance.toFixed(1)} mét
+                  </span>
+                </div>
+              )}
+              {allowedRadius && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--muted)' }}>Bán kính cho phép:</span>
+                  <span style={{ color: 'var(--white2)' }}>{allowedRadius} mét</span>
+                </div>
               )}
             </div>
           )}

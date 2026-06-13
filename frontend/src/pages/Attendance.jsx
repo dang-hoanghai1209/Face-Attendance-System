@@ -108,8 +108,22 @@ export default function Attendance() {
 
   const selectedClassroom = useMemo(() => {
     if (!selectedSession) return null
-    // Nếu active-sessions trả về trực tiếp thông tin phòng học, ưu tiên sử dụng
-    if (selectedSession.classroom_gps_lat !== undefined && selectedSession.classroom_gps_lng !== undefined) {
+
+    // 1. Ưu tiên lấy tọa độ GPS động trực tiếp từ session
+    if (selectedSession.latitude !== undefined && selectedSession.latitude !== null &&
+        selectedSession.longitude !== undefined && selectedSession.longitude !== null) {
+      return {
+        id: null,
+        name: selectedSession.room_name || 'Phòng học (Session GPS)',
+        gps_lat: selectedSession.latitude,
+        gps_lng: selectedSession.longitude,
+        radius_meters: selectedSession.radius_meters || 15
+      }
+    }
+
+    // 2. Thử với trường classroom_gps_lat/lng nếu active-sessions trả về
+    if (selectedSession.classroom_gps_lat !== undefined && selectedSession.classroom_gps_lat !== null &&
+        selectedSession.classroom_gps_lng !== undefined && selectedSession.classroom_gps_lng !== null) {
       return {
         id: selectedSession.classroom_id,
         name: selectedSession.classroom_name || 'Phòng học',
@@ -118,8 +132,30 @@ export default function Attendance() {
         radius_meters: selectedSession.radius_meters || 15
       }
     }
-    if (!selectedSession.classroom_id) return null
-    return classrooms.find((c) => String(c.id) === String(selectedSession.classroom_id))
+
+    // 3. Fallback lấy từ classrooms tĩnh
+    const classroom = selectedSession.classroom_id
+      ? classrooms.find((c) => String(c.id) === String(selectedSession.classroom_id))
+      : null
+
+    if (classroom) {
+      return {
+        id: classroom.id,
+        name: classroom.name || 'Phòng học',
+        gps_lat: classroom.gps_lat,
+        gps_lng: classroom.gps_lng,
+        radius_meters: classroom.radius_meters || 15
+      }
+    }
+
+    // 4. Nếu hoàn toàn không có tọa độ GPS nào, vẫn trả về đối tượng có room_name / classroom_name
+    return {
+      id: selectedSession.classroom_id || null,
+      name: selectedSession.room_name || selectedSession.classroom_name || 'Chưa xác định phòng học',
+      gps_lat: null,
+      gps_lng: null,
+      radius_meters: selectedSession.radius_meters || null
+    }
   }, [classrooms, selectedSession])
 
   // Responsive listener

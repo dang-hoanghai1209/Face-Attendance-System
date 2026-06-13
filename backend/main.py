@@ -470,70 +470,8 @@ def _recognize_uploaded_face_multi(
             "face_count": len(results),
         }
 
-        recognition_status, recognized_code, similarity = match_embedding(
-            embedding,
-            db_embeddings,
-            legacy_embeddings=legacy_embeddings,
-            include_legacy=ENABLE_LEGACY_EMBEDDINGS,
-        )
-        student_code = recognized_code if recognized_code != "Unknown" else None
-        student = None
-        if student_code and recognition_status in {"success", "uncertain"}:
-            student = db.query(Student).filter(Student.student_code == student_code).first()
-        student_data = _serialize_student(student)
-        official_warning = _official_attendance_warning(student) if official_mode else None
-        official_warning_code = None
-        if official_mode and not official_warning:
-            official_warning, official_warning_code = _session_membership_warning(student_data, session)
-        message = {
-            "success": "Nhận diện khuôn mặt thành công.",
-            "uncertain": "Đã phát hiện khuôn mặt nhưng chưa đủ độ tin cậy. Vui lòng xác nhận thủ công.",
-            "unknown": "Đã phát hiện khuôn mặt nhưng không nhận diện được sinh viên.",
-        }[recognition_status]
-        if official_warning:
-            message = official_warning
-        audit_id = None
-        if audit_recognition:
-            audit_status = CROSS_CLASS_REASON_CODE if official_warning_code == CROSS_CLASS_REASON_CODE else recognition_status
-            attempt = _audit_recognition_safely(
-                db,
-                session_id=session_id,
-                predicted_student_code=student_code,
-                confidence=similarity,
-                status=audit_status,
-                image_path=capture_path,
-                message=message,
-            )
-            audit_id = attempt.id if attempt else None
     finally:
         db.close()
-
-    processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
-    return {
-        "status": recognition_status,
-        "student_id": student_data["id"] if student_data else None,
-        "student_code": student_code,
-        "sample_code": student_code,
-        "full_name": student_data["full_name"] if student_data else None,
-        "data_source": student_data["data_source"] if student_data else None,
-        "is_demo": student_data["is_demo"] if student_data else None,
-        "registration_method": student_data["registration_method"] if student_data else None,
-        "student": student_data,
-        "confidence": similarity,
-        "confidence_percent": f"{max(similarity, 0.0):.0%}",
-        "official_attendance_allowed": official_warning is None and recognition_status in {"success", "uncertain"},
-        "official_attendance_warning": official_warning,
-        "official_attendance_warning_code": official_warning_code,
-        "recognized": student_data is not None and recognition_status in {"success", "uncertain"},
-        "requires_manual_confirmation": official_warning_code == CROSS_CLASS_REASON_CODE,
-        "reason": official_warning_code,
-        "session_id": session_id,
-        "processing_time_ms": processing_time_ms,
-        "processing_ms": processing_time_ms,
-        "audit_id": audit_id,
-        "capture_path": capture_path,
-        "message": message,
-    }
 
 
 app.include_router(auth.router)

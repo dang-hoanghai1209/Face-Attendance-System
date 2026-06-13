@@ -166,6 +166,16 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(response["status"], "success")
         self.assertEqual(by_code["63123456"]["status"], "manual")
 
+    def test_recognize_no_face_returns_empty_results(self):
+        session = self.add_session()
+        main.image_bytes_to_face_embeddings = lambda _image: []
+
+        result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+
+        self.assertEqual(result["status"], "no_face")
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["face_count"], 0)
+
     def test_recognize_returns_multi_face_results_with_backward_compatible_top_level(self):
         session = self.add_session()
         first_student = self.add_student(student_code="63123456", class_name="63LFW")
@@ -196,6 +206,35 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(result["results"][1]["status"], "uncertain")
         self.assertEqual(result["results"][1]["student_code"], "63123457")
         self.assertEqual(self.db.query(RecognitionAttempt).count(), 2)
+
+    def test_recognize_multi_face_threshold_boundaries(self):
+        session = self.add_session()
+        self.add_student(student_code="63123456", class_name="63LFW")
+        self.add_student(student_code="63123457", class_name="63LFW")
+        main.image_bytes_to_face_embeddings = lambda _image: [
+            {"embedding": torch.full((512,), 1.0), "bbox": {"x": 1, "y": 1, "w": 10, "h": 10}},
+            {"embedding": torch.full((512,), 2.0), "bbox": {"x": 2, "y": 2, "w": 10, "h": 10}},
+            {"embedding": torch.full((512,), 3.0), "bbox": {"x": 3, "y": 3, "w": 10, "h": 10}},
+        ]
+        main.fetch_db_embeddings = lambda _db: [object()]
+
+        def fake_match(embedding, *_args, **_kwargs):
+            marker = embedding[0].item()
+            if marker == 1.0:
+                return "success", "63123456", main.THRESHOLD_CONFIRM
+            if marker == 2.0:
+                return "uncertain", "63123457", main.THRESHOLD_UNCERTAIN
+            return "unknown", "Unknown", main.THRESHOLD_UNCERTAIN - 0.01
+
+        main.match_embedding = fake_match
+
+        result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+
+        self.assertEqual([item["status"] for item in result["results"]], ["success", "uncertain", "unknown"])
+        self.assertEqual(result["results"][0]["confidence"], main.THRESHOLD_CONFIRM)
+        self.assertEqual(result["results"][1]["confidence"], main.THRESHOLD_UNCERTAIN)
+        self.assertLess(result["results"][2]["confidence"], main.THRESHOLD_UNCERTAIN)
+        self.assertIsNone(result["results"][2]["student_code"])
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ from services.timezone_service import now_in_app_timezone
 EARLY_CHECKIN_MINUTES = 5
 PRESENT_WINDOW_MINUTES = 1
 LATE_THRESHOLD_MINUTES = 10
+MIN_SESSION_ENROLLMENTS = 5
+MIN_SESSION_ENROLLMENTS_MESSAGE = "Buổi học cần tối thiểu 5 sinh viên đã được đăng ký"
 ATTENDED_STATUSES = {"present", "late", "manual", "left_early"}
 OFFICIAL_ATTENDANCE_BLOCK_MESSAGE = (
     "Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức."
@@ -211,6 +213,23 @@ def validate_checkin_window(session: ClassSession, check_in_at: datetime):
         attendance_error(403, "attendance_closed", "Đã quá thời gian điểm danh.")
 
 
+def validate_min_session_enrollments(db: Session, session: ClassSession):
+    enrollment_count = (
+        db.query(Enrollment)
+        .filter(Enrollment.session_id == session.id)
+        .count()
+    )
+    if 0 < enrollment_count < MIN_SESSION_ENROLLMENTS:
+        attendance_error(
+            403,
+            "insufficient_enrollments",
+            MIN_SESSION_ENROLLMENTS_MESSAGE,
+            enrollment_count=enrollment_count,
+            minimum_required=MIN_SESSION_ENROLLMENTS,
+        )
+    return enrollment_count
+
+
 def haversine_distance_meters(lat1, lng1, lat2, lng2):
     earth_radius_meters = 6_371_000
     lat1_rad, lng1_rad, lat2_rad, lng2_rad = map(radians, [lat1, lng1, lat2, lng2])
@@ -356,6 +375,7 @@ def record_checkin(
     existing = get_session_record(db, student.id, session_id)
 
     check_in_at = now_in_app_timezone()
+    validate_min_session_enrollments(db, session)
     validate_checkin_window(session, check_in_at)
     gps_data = validate_gps(db, session, gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy=gps_accuracy) or {}
 

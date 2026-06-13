@@ -89,26 +89,24 @@ class SessionRouteTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 422)
         self.assertEqual(context.exception.detail, "Thiếu tọa độ GPS của buổi học")
 
-    def test_create_session_requires_minimum_five_students(self):
+    def test_create_session_does_not_require_minimum_five_students_by_class_name(self):
         self.add_students(count=4)
 
-        with self.assertRaises(HTTPException) as context:
-            create_session(
-                SessionCreate(
-                    subject="Database",
-                    class_name="63LFW",
-                    latitude=12.238912,
-                    longitude=109.196748,
-                    session_date=date(2026, 6, 1),
-                    start_time=time(7, 0),
-                    end_time=time(9, 0),
-                ),
-                _current_user=None,
-                db=self.db,
-            )
+        session = create_session(
+            SessionCreate(
+                subject="Database",
+                class_name="63LFW",
+                latitude=12.238912,
+                longitude=109.196748,
+                session_date=date(2026, 6, 1),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+            ),
+            _current_user=None,
+            db=self.db,
+        )
 
-        self.assertEqual(context.exception.status_code, 422)
-        self.assertEqual(context.exception.detail, "Lớp cần tối thiểu 5 sinh viên")
+        self.assertEqual(session.class_name, "63LFW")
 
     def test_update_session_rejects_invalid_effective_time_range(self):
         session = ClassSession(

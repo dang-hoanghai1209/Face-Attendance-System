@@ -70,6 +70,11 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.db.refresh(session)
         return session
 
+    def add_session_enrollments(self, session, students):
+        for student in students:
+            self.db.add(Enrollment(session_id=session.id, student_id=student.id, status="active"))
+        self.db.commit()
+
     def add_section_session(self):
         classroom = Classroom(
             name="Room 101",
@@ -295,6 +300,52 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.detail["status"], "not_started")
         self.assertIn("Buổi học chưa bắt đầu", ctx.exception.detail["message"])
+
+    def test_checkin_rejects_session_with_less_than_five_enrollments(self):
+        student = self.add_student()
+        extra_students = [
+            self.add_student(student_code=f"6313388{index}", full_name=f"Student {index}")
+            for index in range(1, 4)
+        ]
+        session = self.add_session()
+        self.add_session_enrollments(session, [student, *extra_students])
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        with self.assertRaises(Exception) as ctx:
+            attendance_service.record_checkin(
+                self.db,
+                student.student_code,
+                session.id,
+                gps_lat=session.latitude,
+                gps_lng=session.longitude,
+            )
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail["status"], "insufficient_enrollments")
+        self.assertEqual(ctx.exception.detail["message"], "Buổi học cần tối thiểu 5 sinh viên đã được đăng ký")
+        self.assertEqual(ctx.exception.detail["enrollment_count"], 4)
+        self.assertEqual(ctx.exception.detail["minimum_required"], 5)
+
+    def test_checkin_allows_session_with_at_least_five_enrollments(self):
+        student = self.add_student()
+        extra_students = [
+            self.add_student(student_code=f"6313390{index}", full_name=f"Student {index}")
+            for index in range(1, 5)
+        ]
+        session = self.add_session()
+        self.add_session_enrollments(session, [student, *extra_students])
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        response = attendance_service.record_checkin(
+            self.db,
+            student.student_code,
+            session.id,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
+
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(response["student_code"], student.student_code)
 
     def test_section_session_requires_active_enrollment(self):
         self.add_student()

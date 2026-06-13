@@ -41,6 +41,59 @@ const toTimeInput = (value) => value ? String(value).slice(0, 5) : ''
 const formatTime = (value) => toTimeInput(value) || 'Chưa đặt giờ'
 
 // ------------------------------------------------------------------ //
+// Helpers for Alerts
+// ------------------------------------------------------------------ //
+const getImageUrl = (path) => {
+  if (!path) return null
+  if (/^https?:\/\//i.test(path)) return path
+  const base = api.defaults.baseURL || ''
+  const host = base.replace(/\/api$/, '')
+  const cleanPath = path.startsWith('/') ? path : `/${path}`
+  return `${host}${cleanPath}`
+}
+
+const getAlertCardStyle = (type) => {
+  if (type === 'SPOOF' || type === 'UNKNOWN_FACE') {
+    return {
+      border: '1px solid rgba(244,63,94,0.3)',
+      background: 'rgba(244,63,94,0.06)',
+      color: '#fda4af',
+      badgeBg: 'rgba(244,63,94,0.15)',
+      badgeColor: '#fb7185',
+      label: type === 'SPOOF' ? 'Giả mạo (Spoof)' : 'Khuôn mặt lạ (Unknown)'
+    }
+  }
+  if (type === 'NOT_ENROLLED') {
+    return {
+      border: '1px solid rgba(249,115,22,0.3)',
+      background: 'rgba(249,115,22,0.06)',
+      color: '#ffedd5',
+      badgeBg: 'rgba(249,115,22,0.15)',
+      badgeColor: '#f97316',
+      label: 'Chưa đăng ký môn học'
+    }
+  }
+  if (type === 'LATE_ENTRY') {
+    return {
+      border: '1px solid rgba(251,191,36,0.3)',
+      background: 'rgba(251,191,36,0.06)',
+      color: '#fef3c7',
+      badgeBg: 'rgba(251,191,36,0.15)',
+      badgeColor: '#fbbf24',
+      label: 'Đi học muộn'
+    }
+  }
+  return {
+    border: '1px solid var(--bdr)',
+    background: 'rgba(255,255,255,0.02)',
+    color: 'var(--white)',
+    badgeBg: 'rgba(255,255,255,0.05)',
+    badgeColor: 'var(--white2)',
+    label: type
+  }
+}
+
+// ------------------------------------------------------------------ //
 // Component
 // ------------------------------------------------------------------ //
 export default function Sessions() {
@@ -61,10 +114,43 @@ export default function Sessions() {
   const [importClassName,   setImportClassName]   = useState('')
   const [manualCodes,       setManualCodes]       = useState('')
 
+  // Alert states
+  const [alertCounts,       setAlertCounts]       = useState({})
+  const [alertModalTarget,  setAlertModalTarget]  = useState(null)
+  const [activeAlerts,      setActiveAlerts]      = useState([])
+  const [alertLoading,      setAlertLoading]      = useState(false)
+  const [alertMessage,      setAlertMessage]      = useState('')
+
+  const loadAlertCounts = async (sessionsList) => {
+    const counts = {}
+    await Promise.all(
+      sessionsList.map(async (s) => {
+        try {
+          const res = await api.get(`/alerts/session/${s.id}/count`)
+          counts[s.id] = res.data.total_active
+        } catch (err) {
+          console.error(`Failed to load alert count for session ${s.id}`, err)
+          counts[s.id] = 0
+        }
+      })
+    )
+    setAlertCounts(counts)
+  }
+
+  // Active alerts polling effect
+  useEffect(() => {
+    if (!alertModalTarget) return
+    const id = setInterval(() => {
+      loadActiveAlertsSilent(alertModalTarget.id)
+    }, 5000)
+    return () => clearInterval(id)
+  }, [alertModalTarget])
+
   const loadSessions = async () => {
     try {
       const response = await api.get('/sessions/')
       setSessions(response.data)
+      loadAlertCounts(response.data)
     } catch (error) {
       setMessage(getApiErrorMessage(error, 'Không tải được danh sách buổi học.'))
     }
@@ -75,7 +161,10 @@ export default function Sessions() {
     const load = async () => {
       try {
         const response = await api.get('/sessions/')
-        if (mounted) setSessions(response.data)
+        if (mounted) {
+          setSessions(response.data)
+          loadAlertCounts(response.data)
+        }
       } catch (error) {
         if (mounted) setMessage(getApiErrorMessage(error, 'Không tải được danh sách buổi học.'))
       }
@@ -273,6 +362,57 @@ export default function Sessions() {
     }
   }
 
+  const handleOpenAlerts = (session) => {
+    setAlertModalTarget(session)
+    setAlertMessage('')
+    loadActiveAlerts(session.id)
+  }
+
+  const loadActiveAlerts = async (sid) => {
+    setAlertLoading(true)
+    try {
+      const response = await api.get(`/alerts/session/${sid}/active`)
+      setActiveAlerts(response.data)
+    } catch (error) {
+      setAlertMessage(getApiErrorMessage(error, 'Không tải được danh sách cảnh báo.'))
+    } finally {
+      setAlertLoading(false)
+    }
+  }
+
+  const loadActiveAlertsSilent = async (sid) => {
+    try {
+      const response = await api.get(`/alerts/session/${sid}/active`)
+      setActiveAlerts(response.data)
+      const countRes = await api.get(`/alerts/session/${sid}/count`)
+      setAlertCounts(prev => ({ ...prev, [sid]: countRes.data.total_active }))
+    } catch (error) {
+      console.warn('Silent alert reload failed', error)
+    }
+  }
+
+  const handleDismissAlert = async (alertId) => {
+    const note = window.prompt('Nhập ghi chú xử lý (không bắt buộc):', 'Đã kiểm tra thực tế')
+    if (note === null) return
+
+    setAlertLoading(true)
+    setAlertMessage('')
+    try {
+      await api.post(`/alerts/${alertId}/dismiss`, {
+        note: note.trim() || 'Đã kiểm tra',
+        dismissed_by: 'lecturer'
+      })
+      setAlertMessage('✅ Đã tắt cảnh báo bảo mật.')
+      await loadActiveAlerts(alertModalTarget.id)
+      const countRes = await api.get(`/alerts/session/${alertModalTarget.id}/count`)
+      setAlertCounts(prev => ({ ...prev, [alertModalTarget.id]: countRes.data.total_active }))
+    } catch (error) {
+      setAlertMessage(getApiErrorMessage(error, 'Không xử lý được cảnh báo.'))
+    } finally {
+      setAlertLoading(false)
+    }
+  }
+
   // ---------------------------------------------------------------- //
   // Render
   // ---------------------------------------------------------------- //
@@ -403,6 +543,32 @@ export default function Sessions() {
                 <td>{formatTime(session.end_time)}</td>
                 <td>
                   <div className="toolbar">
+                    <button
+                      className="secondary"
+                      onClick={() => handleOpenAlerts(session)}
+                      disabled={loading}
+                      style={{
+                        position: 'relative',
+                        borderColor: alertCounts[session.id] > 0 ? 'var(--red)' : 'var(--bdr)'
+                      }}
+                    >
+                      ⚠️ Cảnh báo
+                      {alertCounts[session.id] > 0 && (
+                        <span style={{
+                          position: 'absolute',
+                          top: -6,
+                          right: -6,
+                          background: 'var(--red)',
+                          color: '#fff',
+                          borderRadius: '50%',
+                          padding: '2px 6px',
+                          fontSize: 10,
+                          fontWeight: 'bold'
+                        }}>
+                          {alertCounts[session.id]}
+                        </span>
+                      )}
+                    </button>
                     <button className="secondary" onClick={() => handleOpenEnrollment(session)} disabled={loading}>
                       Đăng ký
                     </button>
@@ -450,6 +616,32 @@ export default function Sessions() {
                 </span>
               </div>
               <div className="mobile-card-actions">
+                <button
+                  className="secondary"
+                  onClick={() => handleOpenAlerts(session)}
+                  disabled={loading}
+                  style={{
+                    position: 'relative',
+                    borderColor: alertCounts[session.id] > 0 ? 'var(--red)' : 'var(--bdr)'
+                  }}
+                >
+                  ⚠️ Cảnh báo
+                  {alertCounts[session.id] > 0 && (
+                    <span style={{
+                      position: 'absolute',
+                      top: -6,
+                      right: -6,
+                      background: 'var(--red)',
+                      color: '#fff',
+                      borderRadius: '50%',
+                      padding: '2px 6px',
+                      fontSize: 10,
+                      fontWeight: 'bold'
+                    }}>
+                      {alertCounts[session.id]}
+                    </span>
+                  )}
+                </button>
                 <button className="secondary" onClick={() => handleOpenEnrollment(session)} disabled={loading}>
                   Đăng ký
                 </button>
@@ -688,12 +880,227 @@ export default function Sessions() {
                 </div>
               )}
             </div>
-
             {/* Footer close button */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--bdr)', paddingTop: 10 }}>
               <button
                 className="secondary"
                 onClick={() => setEnrollModalTarget(null)}
+                style={{ minHeight: 38 }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Alerts Modal */}
+      {alertModalTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 12
+          }}
+        >
+          <div
+            style={{
+              width: 'min(620px, 100%)',
+              maxHeight: '90vh',
+              background: 'var(--navy2)',
+              border: '1px solid var(--bdr2)',
+              borderRadius: 12,
+              padding: '20px 16px',
+              boxShadow: 'var(--shadow)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--bdr)', paddingBottom: 10 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, color: 'var(--white)' }}>Cảnh báo bảo mật</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+                  Buổi #{alertModalTarget.id} · {alertModalTarget.subject} ({alertModalTarget.class_name})
+                </p>
+              </div>
+              <button
+                className="secondary"
+                onClick={() => setAlertModalTarget(null)}
+                style={{ minHeight: 32, padding: '0 8px', fontSize: 18 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Notification message inside modal */}
+            {alertMessage && (
+              <p
+                style={{
+                  margin: 0,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  background: alertMessage.startsWith('✅') ? 'rgba(0, 201, 167, 0.08)' : 'rgba(244, 63, 94, 0.08)',
+                  border: `1px solid ${alertMessage.startsWith('✅') ? 'rgba(0, 201, 167, 0.2)' : 'rgba(244, 63, 94, 0.2)'}`,
+                  color: alertMessage.startsWith('✅') ? 'var(--teal)' : 'var(--red)',
+                  lineHeight: 1.4,
+                  wordBreak: 'break-word'
+                }}
+              >
+                {alertMessage}
+              </p>
+            )}
+
+            {/* Alerts list wrapper */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: 240 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, color: 'var(--white2)' }}>
+                <span>Cảnh báo chưa xử lý (Active)</span>
+                <span style={{ color: 'var(--red)' }}>Số lượng: {activeAlerts.length}</span>
+              </div>
+
+              {alertLoading && activeAlerts.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted)', fontSize: 13 }}>
+                  Đang tải danh sách cảnh báo...
+                </div>
+              ) : activeAlerts.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--muted)', fontSize: 13, border: '1px dashed var(--bdr)', borderRadius: 8 }}>
+                  Không có cảnh báo đang hoạt động.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {activeAlerts.map((al) => {
+                    const style = getAlertCardStyle(al.alert_type)
+                    return (
+                      <div
+                        key={al.id}
+                        style={{
+                          display: 'flex',
+                          gap: 12,
+                          padding: 12,
+                          background: style.background,
+                          border: style.border,
+                          borderRadius: 8,
+                          position: 'relative'
+                        }}
+                      >
+                        {/* Image or fallback */}
+                        {al.captured_img ? (
+                          <img
+                            src={getImageUrl(al.captured_img)}
+                            alt="Captured"
+                            style={{
+                              width: 72,
+                              height: 72,
+                              borderRadius: 6,
+                              objectFit: 'cover',
+                              border: '1px solid rgba(255,255,255,0.1)'
+                            }}
+                            onError={(e) => {
+                              e.target.style.display = 'none'
+                              e.target.nextSibling.style.display = 'flex'
+                            }}
+                          />
+                        ) : null}
+                        <div
+                          style={{
+                            width: 72,
+                            height: 72,
+                            borderRadius: 6,
+                            background: 'rgba(255,255,255,0.05)',
+                            display: al.captured_img ? 'none' : 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 24,
+                            border: '1px solid rgba(255,255,255,0.05)'
+                          }}
+                        >
+                          ⚠️
+                        </div>
+
+                        {/* Details */}
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                background: style.badgeBg,
+                                color: style.badgeColor
+                              }}
+                            >
+                              {style.label}
+                            </span>
+                            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                              {al.created_at ? new Date(al.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
+                            </span>
+                          </div>
+
+                          {al.student_code && (
+                            <div style={{ fontSize: 13, color: 'var(--white)', fontWeight: 600 }}>
+                              {al.full_name || 'Học viên'} ({al.student_code})
+                            </div>
+                          )}
+
+                          {al.class_name && (
+                            <div style={{ fontSize: 11, color: 'var(--white2)' }}>
+                              Lớp: {al.class_name}
+                            </div>
+                          )}
+
+                          <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {al.confidence !== null && al.confidence !== undefined && (
+                              <span>Độ tin cậy: {(al.confidence * 100).toFixed(0)}%</span>
+                            )}
+                            {al.liveness_score !== null && al.liveness_score !== undefined && (
+                              <span>Liveness: {(al.liveness_score * 100).toFixed(0)}%</span>
+                            )}
+                            {al.gps_lat !== null && al.gps_lat !== undefined && (
+                              <span>GPS: {al.gps_lat.toFixed(4)}, {al.gps_lng.toFixed(4)}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Dismiss action */}
+                        <button
+                          className="secondary"
+                          onClick={() => handleDismissAlert(al.id)}
+                          style={{
+                            alignSelf: 'center',
+                            minHeight: 32,
+                            padding: '0 10px',
+                            fontSize: 12,
+                            borderColor: 'rgba(255,255,255,0.15)',
+                            background: 'rgba(255,255,255,0.02)',
+                            color: 'var(--white2)'
+                          }}
+                          disabled={alertLoading}
+                        >
+                          Bỏ qua
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer close button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--bdr)', paddingTop: 10 }}>
+              <button
+                className="secondary"
+                onClick={() => setAlertModalTarget(null)}
                 style={{ minHeight: 38 }}
               >
                 Đóng

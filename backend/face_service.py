@@ -22,6 +22,9 @@ THRESHOLD_CONFIRM = min(max(float(os.getenv("THRESHOLD_CONFIRM", "0.75")), 0.0),
 THRESHOLD_UNCERTAIN = min(max(float(os.getenv("THRESHOLD_UNCERTAIN", "0.60")), 0.0), 1.0)
 ENABLE_LEGACY_EMBEDDINGS = os.getenv("ENABLE_LEGACY_EMBEDDINGS", "false").lower() == "true"
 MAX_RECOGNITION_FACES = 4
+ENABLE_LIVENESS = os.getenv("ENABLE_LIVENESS", "false").lower() in {"1", "true", "yes", "on"}
+LIVENESS_THRESHOLD = min(max(float(os.getenv("LIVENESS_THRESHOLD", "0.80")), 0.0), 1.0)
+LIVENESS_MODEL = os.getenv("LIVENESS_MODEL", "minifasnet")
 
 
 def face_models_loaded():
@@ -75,6 +78,24 @@ def image_bytes_to_embedding(image_bytes):
     with torch.inference_mode():
         embedding = embedder(face.unsqueeze(0).to(device)).detach().cpu().reshape(-1)
     return embedding
+
+
+def check_liveness(image_bytes: bytes) -> dict:
+    if not ENABLE_LIVENESS:
+        return {
+            "liveness_passed": True,
+            "score": None,
+            "label": "disabled",
+        }
+
+    return {
+        "liveness_passed": False,
+        "score": None,
+        "label": "unavailable",
+        "model": LIVENESS_MODEL,
+        "threshold": LIVENESS_THRESHOLD,
+        "message": "Liveness model is not available.",
+    }
 
 
 def _bbox_from_box(box, image_size):

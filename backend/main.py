@@ -15,6 +15,7 @@ from face_service import (
     ENABLE_LEGACY_EMBEDDINGS,
     THRESHOLD_CONFIRM,
     THRESHOLD_UNCERTAIN,
+    check_liveness,
     device,
     count_faces_in_image_bytes,
     face_models_loaded,
@@ -291,6 +292,65 @@ def _recognize_uploaded_face_multi(
             db.close()
 
     try:
+        liveness_result = check_liveness(image_data)
+    except Exception as exc:
+        liveness_result = {
+            "liveness_passed": False,
+            "score": None,
+            "label": "error",
+            "message": f"Liveness check failed: {exc}",
+        }
+    liveness_score = liveness_result.get("score")
+    if not liveness_result.get("liveness_passed", False):
+        processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
+        message = liveness_result.get("message") or "Liveness check failed."
+        audit_id = None
+        if audit_recognition:
+            db = SessionLocal()
+            try:
+                attempt = _audit_recognition_safely(
+                    db,
+                    session_id=session_id,
+                    confidence=liveness_score,
+                    status="spoof",
+                    image_path=capture_path,
+                    message=message,
+                )
+                audit_id = attempt.id if attempt else None
+            finally:
+                db.close()
+
+        return {
+            "status": "spoof",
+            "student_id": None,
+            "student_code": None,
+            "sample_code": None,
+            "full_name": None,
+            "class_name": None,
+            "data_source": None,
+            "is_demo": None,
+            "registration_method": None,
+            "student": None,
+            "confidence": liveness_score if liveness_score is not None else -1.0,
+            "confidence_percent": "0%" if liveness_score is None else f"{max(liveness_score, 0.0):.0%}",
+            "liveness_score": liveness_score,
+            "official_attendance_allowed": False,
+            "official_attendance_warning": message,
+            "official_attendance_warning_code": "spoof",
+            "recognized": False,
+            "requires_manual_confirmation": False,
+            "reason": "spoof",
+            "session_id": session_id,
+            "processing_time_ms": processing_time_ms,
+            "processing_ms": processing_time_ms,
+            "audit_id": audit_id,
+            "capture_path": capture_path,
+            "results": [],
+            "face_count": 0,
+            "message": message,
+        }
+
+    try:
         if reject_multiple_faces:
             face_count = count_faces_in_image_bytes(image_data)
             if face_count > 1:
@@ -369,7 +429,7 @@ def _recognize_uploaded_face_multi(
             "student": None,
             "confidence": -1.0,
             "confidence_percent": "0%",
-            "liveness_score": None,
+            "liveness_score": liveness_score,
             "official_attendance_allowed": False,
             "official_attendance_warning": None,
             "processing_time_ms": processing_time_ms,
@@ -442,7 +502,7 @@ def _recognize_uploaded_face_multi(
                     "student": student_data,
                     "confidence": similarity,
                     "confidence_percent": f"{max(similarity, 0.0):.0%}",
-                    "liveness_score": None,
+                    "liveness_score": liveness_score,
                     "bbox": face.get("bbox"),
                     "official_attendance_allowed": official_warning is None and recognition_status in {"success", "uncertain"},
                     "official_attendance_warning": official_warning,

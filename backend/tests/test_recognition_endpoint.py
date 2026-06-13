@@ -23,6 +23,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
         self.db = SessionLocal()
+        self.original_check_liveness = main.check_liveness
         self.original_image_bytes_to_embedding = main.image_bytes_to_embedding
         self.original_image_bytes_to_face_embeddings = main.image_bytes_to_face_embeddings
         self.original_count_faces = main.count_faces_in_image_bytes
@@ -30,6 +31,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.original_match_embedding = main.match_embedding
 
     def tearDown(self):
+        main.check_liveness = self.original_check_liveness
         main.image_bytes_to_embedding = self.original_image_bytes_to_embedding
         main.image_bytes_to_face_embeddings = self.original_image_bytes_to_face_embeddings
         main.count_faces_in_image_bytes = self.original_count_faces
@@ -175,6 +177,30 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(result["status"], "no_face")
         self.assertEqual(result["results"], [])
         self.assertEqual(result["face_count"], 0)
+
+    def test_recognize_liveness_fail_returns_spoof_without_recognition(self):
+        session = self.add_session()
+        main.check_liveness = lambda _image: {
+            "liveness_passed": False,
+            "score": 0.31,
+            "label": "spoof",
+            "message": "Liveness check failed.",
+        }
+        main.image_bytes_to_face_embeddings = lambda _image: self.fail("Recognition should not run when liveness fails")
+
+        result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+
+        self.assertEqual(result["status"], "spoof")
+        self.assertEqual(result["liveness_score"], 0.31)
+        self.assertEqual(result["confidence"], 0.31)
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["face_count"], 0)
+        self.assertIsNone(result["student_code"])
+        self.assertIsNone(result["full_name"])
+        self.assertIsNone(result["student"])
+        self.assertIsNotNone(result["audit_id"])
+        audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
+        self.assertEqual(audit.status, "spoof")
 
     def test_recognize_returns_multi_face_results_with_backward_compatible_top_level(self):
         session = self.add_session()

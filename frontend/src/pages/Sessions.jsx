@@ -53,6 +53,14 @@ export default function Sessions() {
   const [loading,   setLoading]   = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
 
+  // Enrollment states
+  const [enrollModalTarget, setEnrollModalTarget] = useState(null)
+  const [enrollments,       setEnrollments]       = useState([])
+  const [enrollLoading,     setEnrollLoading]     = useState(false)
+  const [enrollMessage,     setEnrollMessage]     = useState('')
+  const [importClassName,   setImportClassName]   = useState('')
+  const [manualCodes,       setManualCodes]       = useState('')
+
   const loadSessions = async () => {
     try {
       const response = await api.get('/sessions/')
@@ -164,6 +172,104 @@ export default function Sessions() {
       setMessage(getApiErrorMessage(error, 'Không xóa được buổi học.'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleOpenEnrollment = (session) => {
+    setEnrollModalTarget(session)
+    setEnrollMessage('')
+    setImportClassName('')
+    setManualCodes('')
+    loadEnrollments(session.id)
+  }
+
+  const loadEnrollments = async (sid) => {
+    setEnrollLoading(true)
+    try {
+      const response = await api.get(`/sessions/${sid}/enrollments`)
+      setEnrollments(response.data)
+    } catch (error) {
+      setEnrollMessage(getApiErrorMessage(error, 'Không tải được danh sách đăng ký.'))
+    } finally {
+      setEnrollLoading(false)
+    }
+  }
+
+  const handleImportByClass = async () => {
+    if (!importClassName.trim()) {
+      setEnrollMessage('⚠️ Vui lòng nhập tên lớp để thực hiện import.')
+      return
+    }
+    setEnrollLoading(true)
+    setEnrollMessage('')
+    try {
+      const response = await api.post(`/sessions/${enrollModalTarget.id}/enroll/import`, {
+        class_name: importClassName.trim()
+      })
+      const { added, skipped, total_found } = response.data
+      setEnrollMessage(`✅ Nhập dữ liệu thành công. Tìm thấy: ${total_found} · Thêm mới: ${added} · Bỏ qua: ${skipped}.`)
+      setEnrollments(response.data.enrolled || [])
+      setImportClassName('')
+    } catch (error) {
+      setEnrollMessage(getApiErrorMessage(error, 'Không import được theo lớp.'))
+    } finally {
+      setEnrollLoading(false)
+    }
+  }
+
+  const handleAddManual = async () => {
+    if (!manualCodes.trim()) {
+      setEnrollMessage('⚠️ Vui lòng nhập mã sinh viên.')
+      return
+    }
+    const codes = Array.from(new Set(
+      manualCodes
+        .split(/[\n,]+/)
+        .map(c => c.trim())
+        .filter(Boolean)
+    ))
+
+    if (codes.length === 0) {
+      setEnrollMessage('⚠️ Vui lòng nhập ít nhất một mã sinh viên hợp lệ.')
+      return
+    }
+
+    setEnrollLoading(true)
+    setEnrollMessage('')
+    try {
+      const response = await api.post(`/sessions/${enrollModalTarget.id}/enroll`, {
+        student_codes: codes
+      })
+      const { added, skipped, failed, failed_items } = response.data
+      let statusMsg = `✅ Đã xử lý xong. Thêm mới: ${added} · Bỏ qua: ${skipped} · Thất bại: ${failed}.`
+      if (failed_items && failed_items.length > 0) {
+        const failDetails = failed_items.map(item => `${item.student_code} (${item.reason})`).join(', ')
+        statusMsg += ` (Lỗi: ${failDetails})`
+      }
+      setEnrollMessage(statusMsg)
+      setEnrollments(response.data.enrolled || [])
+      setManualCodes('')
+    } catch (error) {
+      setEnrollMessage(getApiErrorMessage(error, 'Không thêm được sinh viên.'))
+    } finally {
+      setEnrollLoading(false)
+    }
+  }
+
+  const handleDeleteEnrollment = async (studentCode) => {
+    const confirmed = window.confirm(`Bạn có chắc muốn xóa sinh viên ${studentCode} khỏi buổi học này?`)
+    if (!confirmed) return
+
+    setEnrollLoading(true)
+    setEnrollMessage('')
+    try {
+      await api.delete(`/sessions/${enrollModalTarget.id}/enroll/${studentCode}`)
+      setEnrollMessage(`🗑️ Đã xóa sinh viên ${studentCode} khỏi danh sách đăng ký của buổi học.`)
+      await loadEnrollments(enrollModalTarget.id)
+    } catch (error) {
+      setEnrollMessage(getApiErrorMessage(error, 'Không xóa được đăng ký.'))
+    } finally {
+      setEnrollLoading(false)
     }
   }
 
@@ -297,6 +403,9 @@ export default function Sessions() {
                 <td>{formatTime(session.end_time)}</td>
                 <td>
                   <div className="toolbar">
+                    <button className="secondary" onClick={() => handleOpenEnrollment(session)} disabled={loading}>
+                      Đăng ký
+                    </button>
                     <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
                       Sửa
                     </button>
@@ -341,6 +450,9 @@ export default function Sessions() {
                 </span>
               </div>
               <div className="mobile-card-actions">
+                <button className="secondary" onClick={() => handleOpenEnrollment(session)} disabled={loading}>
+                  Đăng ký
+                </button>
                 <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
                   Sửa
                 </button>
@@ -397,6 +509,194 @@ export default function Sessions() {
                 style={{ background:'var(--red)', color:'#ffffff', minHeight:38 }}
               >
                 {loading ? 'Đang xóa...' : 'Xóa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enrollment Management Modal */}
+      {enrollModalTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 12
+          }}
+        >
+          <div
+            style={{
+              width: 'min(560px, 100%)',
+              maxHeight: '90vh',
+              background: 'var(--navy2)',
+              border: '1px solid var(--bdr2)',
+              borderRadius: 12,
+              padding: '20px 16px',
+              boxShadow: 'var(--shadow)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--bdr)', paddingBottom: 10 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, color: 'var(--white)' }}>Danh sách đăng ký</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+                  Buổi #{enrollModalTarget.id} · {enrollModalTarget.subject} ({enrollModalTarget.class_name})
+                </p>
+              </div>
+              <button
+                className="secondary"
+                onClick={() => setEnrollModalTarget(null)}
+                style={{ minHeight: 32, padding: '0 8px', fontSize: 18 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Notification message inside modal */}
+            {enrollMessage && (
+              <p
+                style={{
+                  margin: 0,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  background: enrollMessage.startsWith('✅') ? 'rgba(0, 201, 167, 0.08)' : 'rgba(244, 63, 94, 0.08)',
+                  border: `1px solid ${enrollMessage.startsWith('✅') ? 'rgba(0, 201, 167, 0.2)' : 'rgba(244, 63, 94, 0.2)'}`,
+                  color: enrollMessage.startsWith('✅') ? 'var(--teal)' : 'var(--red)',
+                  lineHeight: 1.4,
+                  wordBreak: 'break-word'
+                }}
+              >
+                {enrollMessage}
+              </p>
+            )}
+
+            {/* Quick action section: Import / Add */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'rgba(255,255,255,0.02)', padding: 12, borderRadius: 8, border: '1px solid var(--bdr)' }}>
+              {/* Import by Class */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  placeholder="Tên lớp (ví dụ: 64-TTQL-1)"
+                  value={importClassName}
+                  onChange={(e) => setImportClassName(e.target.value)}
+                  style={{ flex: 1, minHeight: 36, padding: '6px 10px', fontSize: 13 }}
+                  disabled={enrollLoading}
+                />
+                <button
+                  onClick={handleImportByClass}
+                  disabled={enrollLoading}
+                  style={{ minHeight: 36, padding: '0 12px', fontSize: 13 }}
+                >
+                  Import lớp
+                </button>
+              </div>
+
+              {/* Add Manual */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <textarea
+                  placeholder="Thêm mã SV thủ công (SV001, SV002...)"
+                  rows={2}
+                  value={manualCodes}
+                  onChange={(e) => setManualCodes(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    fontSize: 13,
+                    borderRadius: 6,
+                    border: '1px solid var(--bdr)',
+                    background: 'var(--navy)',
+                    color: 'var(--white)',
+                    resize: 'none'
+                  }}
+                  disabled={enrollLoading}
+                />
+                <button
+                  onClick={handleAddManual}
+                  disabled={enrollLoading}
+                  style={{ minHeight: 34, fontSize: 13, width: 'fit-content', alignSelf: 'flex-end' }}
+                >
+                  Thêm sinh viên
+                </button>
+              </div>
+            </div>
+
+            {/* Enrolled list wrapper */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 180 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, color: 'var(--white2)' }}>
+                <span>Sinh viên đã đăng ký</span>
+                <span style={{ color: 'var(--teal)' }}>Tổng số: {enrollments.length}</span>
+              </div>
+
+              {enrollLoading && enrollments.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted)', fontSize: 13 }}>
+                  Đang tải danh sách đăng ký...
+                </div>
+              ) : enrollments.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted)', fontSize: 13, border: '1px dashed var(--bdr)', borderRadius: 8 }}>
+                  Chưa có sinh viên nào đăng ký cho buổi học này.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {enrollments.map((en) => (
+                    <div
+                      key={en.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 12px',
+                        background: 'rgba(255,255,255,0.01)',
+                        border: '1px solid var(--bdr)',
+                        borderRadius: 6
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 13, color: 'var(--white)', fontWeight: 600 }}>
+                          {en.full_name || 'Họ tên chưa rõ'}
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+                          {en.student_code} · {en.class_name || 'Lớp: ?'}
+                        </span>
+                      </div>
+                      <button
+                        className="secondary"
+                        onClick={() => handleDeleteEnrollment(en.student_code)}
+                        style={{
+                          minHeight: 28,
+                          padding: '0 8px',
+                          fontSize: 11,
+                          borderColor: 'rgba(244,63,94,.25)',
+                          color: '#fb7185',
+                          background: 'rgba(244,63,94,0.04)'
+                        }}
+                        disabled={enrollLoading}
+                      >
+                        Xóa
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer close button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--bdr)', paddingTop: 10 }}>
+              <button
+                className="secondary"
+                onClick={() => setEnrollModalTarget(null)}
+                style={{ minHeight: 38 }}
+              >
+                Đóng
               </button>
             </div>
           </div>

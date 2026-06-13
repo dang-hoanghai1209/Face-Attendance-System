@@ -152,6 +152,27 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
         self.assertEqual(alerts[0].student_id, target.id)
         self.assertEqual(self.attendance_count(), 0)
 
+    def test_zero_enrollments_creates_not_enrolled_alert_without_attendance(self):
+        student = self.add_student()
+        session = self.add_session()
+
+        response = attendance_service.record_checkin(
+            self.db,
+            student.student_code,
+            session.id,
+            confidence=0.89,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+            recognition_status="success",
+        )
+
+        alerts = self.alerts("NOT_ENROLLED")
+        self.assertEqual(response["status"], "not_enrolled")
+        self.assertEqual(response["message"], "Buổi học chưa có danh sách đăng ký sinh viên")
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].student_id, student.id)
+        self.assertEqual(self.attendance_count(), 0)
+
     def test_enrolled_student_outside_window_creates_late_entry_alert_without_attendance(self):
         student, session = self.add_enrolled_session()
         self.patch_now(datetime(2026, 6, 1, 7, 41))

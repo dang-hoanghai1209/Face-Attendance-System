@@ -107,6 +107,14 @@ def _is_student_enrolled_in_session(db: Session, student: Student, session: Clas
     )
 
 
+def count_session_enrollments(db: Session, session: ClassSession):
+    return (
+        db.query(Enrollment)
+        .filter(Enrollment.session_id == session.id)
+        .count()
+    )
+
+
 def _is_legacy_enrolled_or_class_match(db: Session, student: Student, session: ClassSession):
     if session.section_id:
         return (
@@ -264,11 +272,7 @@ def validate_checkin_window(session: ClassSession, check_in_at: datetime):
 
 
 def validate_min_session_enrollments(db: Session, session: ClassSession):
-    enrollment_count = (
-        db.query(Enrollment)
-        .filter(Enrollment.session_id == session.id)
-        .count()
-    )
+    enrollment_count = count_session_enrollments(db, session)
     if 0 < enrollment_count < MIN_SESSION_ENROLLMENTS:
         attendance_error(
             403,
@@ -477,44 +481,45 @@ def record_checkin(
     if block_reason:
         raise HTTPException(status_code=403, detail=block_reason)
 
+    session_enrollment_count = count_session_enrollments(db, session)
+    if session_enrollment_count == 0:
+        alert = create_alert(
+            db,
+            session_id=session_id,
+            alert_type="NOT_ENROLLED",
+            student_id=student.id,
+            captured_img=image_path,
+            confidence=confidence,
+            liveness_score=liveness_score,
+            gps_lat=gps_lat,
+            gps_lng=gps_lng,
+            note="Session has no student enrollment list.",
+        )
+        return _security_alert_response(
+            "not_enrolled",
+            "Buổi học chưa có danh sách đăng ký sinh viên",
+            alert,
+        )
+
     session_enrollment_count = validate_min_session_enrollments(db, session)
-    if session_enrollment_count > 0:
-        if not _is_student_enrolled_in_session(db, student, session):
-            alert = create_alert(
-                db,
-                session_id=session_id,
-                alert_type="NOT_ENROLLED",
-                student_id=student.id,
-                captured_img=image_path,
-                confidence=confidence,
-                liveness_score=liveness_score,
-                gps_lat=gps_lat,
-                gps_lng=gps_lng,
-                note="Recognized student is not enrolled in this session.",
-            )
-            return _security_alert_response(
-                "not_enrolled",
-                "Sinh viên chưa được đăng ký cho buổi học này.",
-                alert,
-            )
-    else:
-        if not _is_legacy_enrolled_or_class_match(db, student, session):
-            if session.section_id:
-                attendance_error(
-                    403,
-                    "not_enrolled",
-                    "Bạn không có trong danh sách đăng ký của lớp học phần này.",
-                )
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "reason": "class_mismatch",
-                    "code": CROSS_CLASS_LEGACY_CODE,
-                    "message": cross_class_attendance_message(student.class_name, session.class_name),
-                    "student_class": student.class_name,
-                    "session_class": session.class_name,
-                },
-            )
+    if not _is_student_enrolled_in_session(db, student, session):
+        alert = create_alert(
+            db,
+            session_id=session_id,
+            alert_type="NOT_ENROLLED",
+            student_id=student.id,
+            captured_img=image_path,
+            confidence=confidence,
+            liveness_score=liveness_score,
+            gps_lat=gps_lat,
+            gps_lng=gps_lng,
+            note="Recognized student is not enrolled in this session.",
+        )
+        return _security_alert_response(
+            "not_enrolled",
+            "Sinh viên chưa được đăng ký cho buổi học này.",
+            alert,
+        )
 
     check_in_at = now_in_app_timezone()
     try:

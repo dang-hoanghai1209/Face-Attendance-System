@@ -54,6 +54,20 @@ class BackendMVP1Tests(unittest.TestCase):
         self.db.refresh(student)
         return student
 
+    def add_min_session_enrollments(self, session, student, total=5):
+        students = [student]
+        for index in range(1, total):
+            students.append(
+                self.add_student(
+                    code=f"{student.student_code}E{session.id}{index}",
+                    class_name=student.class_name,
+                    name=f"Enrollment Student {index}",
+                )
+            )
+        for item in students:
+            self.db.add(Enrollment(session_id=session.id, student_id=item.id, status="active"))
+        self.db.commit()
+
     def add_user(self, username="64100001", role="student", full_name="Test User"):
         user = User(
             username=username,
@@ -322,6 +336,7 @@ class BackendMVP1Tests(unittest.TestCase):
             _current_user=None,
             db=self.db,
         )
+        self.add_min_session_enrollments(session, student)
         original_now = attendance_service.now_in_app_timezone
         attendance_service.now_in_app_timezone = lambda: datetime(2026, 6, 10, 7, 5)
         try:
@@ -367,6 +382,7 @@ class BackendMVP1Tests(unittest.TestCase):
             _current_user=None,
             db=self.db,
         )
+        self.add_min_session_enrollments(session, student)
         original_now = attendance_service.now_in_app_timezone
         attendance_service.now_in_app_timezone = lambda: datetime(2026, 6, 10, 7, 5)
         try:

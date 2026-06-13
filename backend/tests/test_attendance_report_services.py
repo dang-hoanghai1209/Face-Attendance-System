@@ -75,6 +75,18 @@ class AttendanceReportServiceTests(unittest.TestCase):
             self.db.add(Enrollment(session_id=session.id, student_id=student.id, status="active"))
         self.db.commit()
 
+    def add_min_session_enrollments(self, session, student, total=5):
+        students = [student]
+        for index in range(1, total):
+            students.append(
+                self.add_student(
+                    student_code=f"{student.student_code}E{session.id}{index}",
+                    full_name=f"Enrollment Student {index}",
+                    class_name=student.class_name,
+                )
+            )
+        self.add_session_enrollments(session, students)
+
     def add_section_session(self):
         classroom = Classroom(
             name="Room 101",
@@ -127,8 +139,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
             del self.original_now
 
     def test_checkin_on_time(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 31))
 
         response = attendance_service.record_checkin(
@@ -144,8 +157,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(response["data"]["check_in_conf"], 0.91)
 
     def test_checkin_creates_attendance_scan_and_updates_scan_fields(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         scanned_at = datetime(2026, 5, 30, 7, 31)
         self.patch_now(scanned_at)
 
@@ -172,8 +186,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(scans[0].note, "check_in")
 
     def test_checkin_fsm_marks_left_early_then_restores_original_status(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
 
         self.patch_now(datetime(2026, 5, 30, 7, 31))
         first = attendance_service.record_checkin(
@@ -222,8 +237,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual([scan.note for scan in scans], ["check_in", "marked_left_early", "restored_attendance"])
 
     def test_checkin_fsm_does_not_change_manual_attendance(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 31))
         manual = attendance_service.record_manual_attendance(self.db, "63133870", session.id, note="Teacher confirmed")
         self.assertEqual(manual["data"]["status"], "manual")
@@ -257,8 +273,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertIsNone(student.registration_method)
 
     def test_checkin_late(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 35))
 
         response = attendance_service.record_checkin(
@@ -272,34 +289,34 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(response["data"]["status"], "late")
 
     def test_checkin_rejects_after_attendance_deadline(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 41))
 
-        with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(
-                self.db,
-                "63133870",
-                session.id,
-                gps_lat=session.latitude,
-                gps_lng=session.longitude,
-            )
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+        )
 
-        self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(ctx.exception.detail["status"], "attendance_closed")
-        self.assertIn("Đã quá thời gian điểm danh", ctx.exception.detail["message"])
+        self.assertEqual(response["status"], "late_entry")
+        self.assertEqual(response["alert_type"], "LATE_ENTRY")
+        self.assertEqual(self.db.query(Attendance).count(), 0)
 
     def test_checkin_rejects_before_session_start(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 24))
 
-        with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
+        response = attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
-        self.assertEqual(ctx.exception.status_code, 400)
-        self.assertEqual(ctx.exception.detail["status"], "not_started")
-        self.assertIn("Buổi học chưa bắt đầu", ctx.exception.detail["message"])
+        self.assertEqual(response["status"], "late_entry")
+        self.assertEqual(response["alert_type"], "LATE_ENTRY")
+        self.assertEqual(self.db.query(Attendance).count(), 0)
 
     def test_checkin_rejects_session_with_less_than_five_enrollments(self):
         student = self.add_student()
@@ -352,24 +369,24 @@ class AttendanceReportServiceTests(unittest.TestCase):
         _section, classroom, session = self.add_section_session()
         self.patch_now(datetime(2026, 5, 30, 7, 35))
 
-        with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(
-                self.db,
-                "63133870",
-                session.id,
-                gps_lat=classroom.gps_lat,
-                gps_lng=classroom.gps_lng,
-            )
+        response = attendance_service.record_checkin(
+            self.db,
+            "63133870",
+            session.id,
+            gps_lat=classroom.gps_lat,
+            gps_lng=classroom.gps_lng,
+        )
 
-        self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(ctx.exception.detail["status"], "not_enrolled")
-        self.assertEqual(ctx.exception.detail["message"], "Bạn không có trong danh sách đăng ký của lớp học phần này.")
+        self.assertEqual(response["status"], "not_enrolled")
+        self.assertEqual(response["alert_type"], "NOT_ENROLLED")
+        self.assertEqual(response["message"], "Buổi học chưa có danh sách đăng ký sinh viên")
 
     def test_section_session_saves_gps_when_valid(self):
         student = self.add_student()
         section, classroom, session = self.add_section_session()
         self.db.add(Enrollment(course_section_id=section.id, student_id=student.id, status="active"))
         self.db.commit()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 35))
 
         response = attendance_service.record_checkin(
@@ -398,6 +415,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
         section, _classroom, session = self.add_section_session()
         self.db.add(Enrollment(course_section_id=section.id, student_id=student.id, status="active"))
         self.db.commit()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 35))
 
         with self.assertRaises(Exception) as ctx:
@@ -414,8 +432,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.detail["message"], "Ngoài phạm vi lớp học")
 
     def test_checkin_rejects_session_without_gps_configuration(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         session.latitude = None
         session.longitude = None
         self.db.commit()
@@ -435,8 +454,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.detail["message"], "Buổi học chưa cấu hình tọa độ GPS")
 
     def test_checkout_updates_existing_record(self):
-        self.add_student()
+        student = self.add_student()
         session = self.add_session()
+        self.add_min_session_enrollments(session, student)
         self.patch_now(datetime(2026, 5, 30, 7, 35))
         attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
         self.patch_now(datetime(2026, 5, 30, 9, 25))
@@ -457,9 +477,10 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(response["data"]["note"], "Teacher confirmed")
 
     def test_session_report_marks_absent_student(self):
-        self.add_student("63133870", "Nguyen Van A")
+        present_student = self.add_student("63133870", "Nguyen Van A")
         self.add_student("63133871", "Tran Van B")
         session = self.add_session()
+        self.add_min_session_enrollments(session, present_student)
         self.patch_now(datetime(2026, 5, 30, 7, 31))
         checkin_response = attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
@@ -616,13 +637,11 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.add_student(student_code="63133870", class_name="63TTQL")
         session = self.add_session(class_name="64TTQL")
 
-        with self.assertRaises(Exception) as ctx:
-            attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
+        response = attendance_service.record_checkin(self.db, "63133870", session.id, gps_lat=session.latitude, gps_lng=session.longitude)
 
-        detail = ctx.exception.detail
-        self.assertEqual(detail["code"], "cross_class_requires_manual_confirmation")
-        self.assertEqual(detail["reason"], "class_mismatch")
-        self.assertIn("Sinh viên thuộc lớp 63TTQL, khác lớp chính của buổi học 64TTQL", detail["message"])
+        self.assertEqual(response["status"], "not_enrolled")
+        self.assertEqual(response["alert_type"], "NOT_ENROLLED")
+        self.assertEqual(response["message"], "Buổi học chưa có danh sách đăng ký sinh viên")
 
 
     def test_cross_class_manual_attendance_requires_recognition_audit(self):

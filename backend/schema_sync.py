@@ -43,6 +43,12 @@ def _sync_attendance_columns(connection, table_name, columns):
     if "liveness_passed" not in columns:
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN liveness_passed BOOLEAN DEFAULT FALSE"))
         columns.add("liveness_passed")
+    if "scan_count" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN scan_count INTEGER DEFAULT 0 NOT NULL"))
+        columns.add("scan_count")
+    if "last_scan_at" not in columns:
+        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN last_scan_at TIMESTAMP"))
+        columns.add("last_scan_at")
     if "note" not in columns:
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN note TEXT"))
         columns.add("note")
@@ -81,6 +87,7 @@ def _sync_attendance_columns(connection, table_name, columns):
             "WHERE status IS NULL OR status = ''"
         )
     )
+    connection.execute(text(f"UPDATE {table_name} SET scan_count = 0 WHERE scan_count IS NULL"))
 
 
 def _migrate_attendance_log(connection, inspector):
@@ -207,6 +214,35 @@ def _sync_recognition_attempt_columns(connection, columns):
     )
 
 
+def _sync_attendance_scan_columns(connection, columns):
+    if "attendance_id" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN attendance_id INTEGER"))
+        columns.add("attendance_id")
+    if "scanned_at" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN scanned_at TIMESTAMP"))
+        columns.add("scanned_at")
+    if "confidence" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN confidence FLOAT"))
+        columns.add("confidence")
+    if "gps_lat" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN gps_lat FLOAT"))
+        columns.add("gps_lat")
+    if "gps_lng" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN gps_lng FLOAT"))
+        columns.add("gps_lng")
+    if "liveness_passed" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN liveness_passed BOOLEAN"))
+        columns.add("liveness_passed")
+    if "scan_index" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN scan_index INTEGER"))
+        columns.add("scan_index")
+    if "note" not in columns:
+        connection.execute(text("ALTER TABLE attendance_scans ADD COLUMN note TEXT"))
+        columns.add("note")
+
+    connection.execute(text("UPDATE attendance_scans SET scanned_at = CURRENT_TIMESTAMP WHERE scanned_at IS NULL"))
+
+
 def _sync_user_columns(connection, columns):
     if "username" not in columns:
         connection.execute(text("ALTER TABLE users ADD COLUMN username VARCHAR(80)"))
@@ -309,9 +345,18 @@ def sync_schema(engine):
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN classroom_id INTEGER"))
             if "note" not in columns:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN note TEXT"))
+            if "latitude" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN latitude FLOAT"))
+            if "longitude" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN longitude FLOAT"))
+            if "radius_meters" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN radius_meters INTEGER DEFAULT 50"))
+            if "room_name" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN room_name VARCHAR(100)"))
 
             connection.execute(text("UPDATE sessions SET start_time = '07:00:00' WHERE start_time IS NULL"))
             connection.execute(text("UPDATE sessions SET end_time = '09:00:00' WHERE end_time IS NULL"))
+            connection.execute(text("UPDATE sessions SET radius_meters = 50 WHERE radius_meters IS NULL"))
 
         if "attendance" in tables:
             _sync_attendance_columns(connection, "attendance", _get_columns(inspector, "attendance"))
@@ -328,6 +373,9 @@ def sync_schema(engine):
                 connection,
                 _get_columns(inspector, "recognition_attempts"),
             )
+
+        if "attendance_scans" in tables:
+            _sync_attendance_scan_columns(connection, _get_columns(inspector, "attendance_scans"))
 
         if "users" in tables:
             _sync_user_columns(connection, _get_columns(inspector, "users"))

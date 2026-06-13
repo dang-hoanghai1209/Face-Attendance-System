@@ -3,6 +3,10 @@ from sqlalchemy.sql import func
 
 from database import Base
 
+
+ATTENDANCE_STATUSES = {"present", "late", "manual", "left_early"}
+
+
 class Attendance(Base):
     __tablename__ = "attendance"
     __table_args__ = (
@@ -23,5 +27,7 @@ class Attendance(Base):
     distance_meters = Column(Float)
     liveness_passed = Column(Boolean, nullable=True, default=False)
     status = Column(String(20), default="present")
+    scan_count = Column(Integer, nullable=False, default=0)
+    last_scan_at = Column(DateTime)
     note = Column(Text)
     created_at = Column(DateTime, server_default=func.now())

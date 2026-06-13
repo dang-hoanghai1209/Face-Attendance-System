@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.sql import func
 
 from database import Base
@@ -13,6 +13,10 @@ class Session(Base):
     class_name = Column(String(50))
     section_id = Column(Integer, ForeignKey("course_sections.id"), nullable=True, index=True)
     classroom_id = Column(Integer, ForeignKey("classrooms.id"), nullable=True, index=True)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    radius_meters = Column(Integer, default=50)
+    room_name = Column(String(100))
     session_date = Column(Date, nullable=False)
     start_time = Column(Time)
     end_time = Column(Time)

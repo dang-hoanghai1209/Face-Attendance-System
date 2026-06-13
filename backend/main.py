@@ -24,6 +24,7 @@ from face_service import (
     match_embedding,
 )
 from models.recognition_attempt import RecognitionAttempt  # noqa: F401
+from models.attendance_scan import AttendanceScan  # noqa: F401
 from models.classroom import Classroom  # noqa: F401
 from models.course_section import CourseSection  # noqa: F401
 from models.enrollment import Enrollment  # noqa: F401

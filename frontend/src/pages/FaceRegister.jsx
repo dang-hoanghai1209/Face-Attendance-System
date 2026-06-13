@@ -156,8 +156,34 @@ export default function FaceRegister() {
       clearSamples('')
       setRegisteredCount(r.data.total_registered_embeddings); setFaceStatus('registered')
       setMessage(`✅ Đăng ký thành công. Hợp lệ: ${r.data.accepted_samples}, loại: ${r.data.rejected_samples}.`)
-    } catch(e) { setMessage(getApiErrorMessage(e, 'Không đăng ký được khuôn mặt.')) }
-    finally { setSaving(false) }
+    } catch(e) {
+      if (e.response && e.response.status === 403) {
+        const detail = e.response.data?.detail
+        if (detail && typeof detail === 'object' && (detail.message === 'Xác minh liveness thất bại' || detail.liveness_label)) {
+          let errText = 'Ảnh đăng ký không đạt xác minh liveness. Vui lòng chụp lại bằng khuôn mặt thật.'
+          let info = []
+          if (detail.filename) {
+            const match = detail.filename.match(/sample-(\d+)/)
+            const sampleName = match ? `Mẫu #${match[1]}` : detail.filename
+            info.push(`Ảnh: ${sampleName}`)
+          }
+          if (detail.liveness_score !== undefined && detail.liveness_score !== null) {
+            info.push(`Liveness: ${(detail.liveness_score * 100).toFixed(0)}%`)
+          }
+          if (detail.liveness_label) {
+            info.push(`Nhãn: ${detail.liveness_label}`)
+          }
+          if (info.length > 0) {
+            errText += ` (${info.join(' · ')})`
+          }
+          setMessage(errText)
+          return
+        }
+      }
+      setMessage(getApiErrorMessage(e, 'Không đăng ký được khuôn mặt.'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const qStyle = qualityColor(quality.status)

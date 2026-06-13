@@ -31,6 +31,7 @@ from models.classroom import Classroom  # noqa: F401
 from models.course_section import CourseSection  # noqa: F401
 from models.enrollment import Enrollment  # noqa: F401
 from models.session import Session as ClassSession
+from models.security_alert import SecurityAlert  # noqa: F401
 from models.student import Student
 from models.subject import Subject  # noqa: F401
 from models.user import User  # noqa: F401

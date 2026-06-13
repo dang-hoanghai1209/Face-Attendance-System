@@ -280,6 +280,125 @@ def _sync_user_columns(connection, columns):
     )
 
 
+def _sync_enrollment_columns(connection, columns):
+    if "session_id" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN session_id INTEGER"))
+        columns.add("session_id")
+    if "enrolled_at" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN enrolled_at TIMESTAMP"))
+        columns.add("enrolled_at")
+    if "note" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN note TEXT"))
+        columns.add("note")
+    if "course_section_id" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN course_section_id INTEGER"))
+        columns.add("course_section_id")
+    if "status" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN status VARCHAR(20) DEFAULT 'active' NOT NULL"))
+        columns.add("status")
+    if "created_at" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN created_at TIMESTAMP"))
+        columns.add("created_at")
+    if "updated_at" not in columns:
+        connection.execute(text("ALTER TABLE enrollments ADD COLUMN updated_at TIMESTAMP"))
+        columns.add("updated_at")
+
+    connection.execute(text("UPDATE enrollments SET enrolled_at = CURRENT_TIMESTAMP WHERE enrolled_at IS NULL"))
+    connection.execute(text("UPDATE enrollments SET status = 'active' WHERE status IS NULL OR status = ''"))
+    connection.execute(text("UPDATE enrollments SET created_at = COALESCE(created_at, enrolled_at, CURRENT_TIMESTAMP)"))
+    connection.execute(text("UPDATE enrollments SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)"))
+    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_enrollments_session_id ON enrollments (session_id)"))
+
+
+def _add_enrollment_session_unique_constraint(connection):
+    if connection.dialect.name != "postgresql":
+        return
+
+    duplicate_count = connection.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM (
+                SELECT session_id, student_id
+                FROM enrollments
+                WHERE session_id IS NOT NULL AND student_id IS NOT NULL
+                GROUP BY session_id, student_id
+                HAVING COUNT(*) > 1
+            ) AS duplicates
+            """
+        )
+    ).scalar()
+
+    if duplicate_count:
+        return
+
+    connection.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'uq_enrollments_session_student'
+                ) THEN
+                    ALTER TABLE enrollments
+                    ADD CONSTRAINT uq_enrollments_session_student UNIQUE (session_id, student_id);
+                END IF;
+            END $$;
+            """
+        )
+    )
+
+
+def _sync_security_alert_columns(connection, columns):
+    if "session_id" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN session_id INTEGER"))
+        columns.add("session_id")
+    if "alert_type" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN alert_type VARCHAR(20)"))
+        columns.add("alert_type")
+    if "student_id" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN student_id INTEGER"))
+        columns.add("student_id")
+    if "captured_img" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN captured_img VARCHAR(255)"))
+        columns.add("captured_img")
+    if "confidence" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN confidence FLOAT"))
+        columns.add("confidence")
+    if "liveness_score" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN liveness_score FLOAT"))
+        columns.add("liveness_score")
+    if "gps_lat" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN gps_lat FLOAT"))
+        columns.add("gps_lat")
+    if "gps_lng" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN gps_lng FLOAT"))
+        columns.add("gps_lng")
+    if "dismissed" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN dismissed BOOLEAN DEFAULT FALSE NOT NULL"))
+        columns.add("dismissed")
+    if "dismissed_by" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN dismissed_by VARCHAR(80)"))
+        columns.add("dismissed_by")
+    if "dismissed_at" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN dismissed_at TIMESTAMP"))
+        columns.add("dismissed_at")
+    if "note" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN note TEXT"))
+        columns.add("note")
+    if "created_at" not in columns:
+        connection.execute(text("ALTER TABLE security_alerts ADD COLUMN created_at TIMESTAMP"))
+        columns.add("created_at")
+
+    connection.execute(text("UPDATE security_alerts SET dismissed = FALSE WHERE dismissed IS NULL"))
+    connection.execute(text("UPDATE security_alerts SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+    connection.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_security_alerts_session_dismissed ON security_alerts (session_id, dismissed)")
+    )
+
+
 def sync_schema(engine):
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -379,3 +498,10 @@ def sync_schema(engine):
 
         if "users" in tables:
             _sync_user_columns(connection, _get_columns(inspector, "users"))
+
+        if "enrollments" in tables:
+            _sync_enrollment_columns(connection, _get_columns(inspector, "enrollments"))
+            _add_enrollment_session_unique_constraint(connection)
+
+        if "security_alerts" in tables:
+            _sync_security_alert_columns(connection, _get_columns(inspector, "security_alerts"))

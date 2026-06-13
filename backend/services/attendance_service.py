@@ -17,7 +17,7 @@ from services.timezone_service import now_in_app_timezone
 EARLY_CHECKIN_MINUTES = 5
 PRESENT_WINDOW_MINUTES = 1
 LATE_THRESHOLD_MINUTES = 10
-ATTENDED_STATUSES = {"present", "late", "manual"}
+ATTENDED_STATUSES = {"present", "late", "manual", "left_early"}
 OFFICIAL_ATTENDANCE_BLOCK_MESSAGE = (
     "Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức."
 )
@@ -222,7 +222,7 @@ def haversine_distance_meters(lat1, lng1, lat2, lng2):
 
 def validate_gps(db: Session, session: ClassSession, gps_lat=None, gps_lng=None, gps_accuracy=None):
     if session.latitude is None or session.longitude is None:
-        return None
+        attendance_error(403, "session_gps_missing", "Buổi học chưa cấu hình tọa độ GPS")
 
     if gps_lat is None or gps_lng is None:
         attendance_error(400, "gps_missing", "Vui lòng cho phép truy cập vị trí GPS để điểm danh.")
@@ -537,6 +537,7 @@ def delete_attendance_record(db: Session, attendance_id: int):
         "full_name": student.full_name if student else None,
         "session_id": record.session_id,
     }
+    db.query(AttendanceScan).filter(AttendanceScan.attendance_id == record.id).delete(synchronize_session=False)
     db.delete(record)
     db.commit()
 

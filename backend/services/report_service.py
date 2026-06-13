@@ -12,8 +12,8 @@ from models.student import Student
 from services.auth_service import resolve_student_for_user
 
 
-ATTENDED_STATUSES = {"present", "late", "manual"}
-STATUS_PRIORITY = {"manual": 3, "present": 2, "late": 1}
+ATTENDED_STATUSES = {"present", "late", "manual", "left_early"}
+STATUS_PRIORITY = {"manual": 4, "present": 3, "late": 2, "left_early": 1}
 
 
 def official_student_filter():

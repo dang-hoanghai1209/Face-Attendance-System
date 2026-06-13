@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.attendance import Attendance
+from models.attendance_scan import AttendanceScan
 from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.recognition_attempt import RecognitionAttempt
@@ -187,7 +188,15 @@ def delete_session(session_id: int, _current_user=Depends(require_admin), db: Se
     if not session:
         raise HTTPException(status_code=404, detail="Buổi học không hợp lệ.")
 
-    db.query(Attendance).filter(Attendance.session_id == session_id).delete()
+    attendance_ids = [
+        row.id
+        for row in db.query(Attendance.id).filter(Attendance.session_id == session_id).all()
+    ]
+    if attendance_ids:
+        db.query(AttendanceScan).filter(AttendanceScan.attendance_id.in_(attendance_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(Attendance).filter(Attendance.session_id == session_id).delete(synchronize_session=False)
     db.query(RecognitionAttempt).filter(RecognitionAttempt.session_id == session_id).delete()
     db.delete(session)
     db.commit()

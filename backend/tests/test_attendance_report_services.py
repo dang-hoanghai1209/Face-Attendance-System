@@ -362,6 +362,27 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.detail["status"], "gps_out_of_range")
         self.assertEqual(ctx.exception.detail["message"], "Ngoài phạm vi lớp học")
 
+    def test_checkin_rejects_session_without_gps_configuration(self):
+        self.add_student()
+        session = self.add_session()
+        session.latitude = None
+        session.longitude = None
+        self.db.commit()
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        with self.assertRaises(Exception) as ctx:
+            attendance_service.record_checkin(
+                self.db,
+                "63133870",
+                session.id,
+                gps_lat=12.238912,
+                gps_lng=109.196748,
+            )
+
+        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.detail["status"], "session_gps_missing")
+        self.assertEqual(ctx.exception.detail["message"], "Buổi học chưa cấu hình tọa độ GPS")
+
     def test_checkout_updates_existing_record(self):
         self.add_student()
         session = self.add_session()
@@ -424,6 +445,31 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(by_code["63133870"]["status"], "absent")
         self.assertEqual(by_code["63133871"]["status"], "present")
 
+    def test_delete_attendance_record_removes_scan_logs(self):
+        student = self.add_student()
+        session = self.add_session()
+        record = Attendance(student_id=student.id, session_id=session.id, status="present")
+        self.db.add(record)
+        self.db.commit()
+        self.db.refresh(record)
+        scan = AttendanceScan(
+            attendance_id=record.id,
+            scanned_at=datetime(2026, 5, 30, 7, 31),
+            scan_index=1,
+            confidence=0.91,
+        )
+        self.db.add(scan)
+        self.db.commit()
+
+        response = attendance_service.delete_attendance_record(self.db, record.id)
+
+        self.assertEqual(response["status"], "success")
+        self.assertIsNone(self.db.query(Attendance).filter(Attendance.id == record.id).first())
+        self.assertEqual(
+            self.db.query(AttendanceScan).filter(AttendanceScan.attendance_id == record.id).count(),
+            0,
+        )
+
     def test_delete_attendance_record_returns_clear_404(self):
         with self.assertRaises(Exception) as ctx:
             attendance_service.delete_attendance_record(self.db, 999)
@@ -439,6 +485,18 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         self.assertEqual(len(records), 1)
         self.assertIs(records[1], first)
+
+    def test_left_early_counts_as_attended_in_class_summary(self):
+        student = self.add_student()
+        session = self.add_session()
+        self.db.add(Attendance(student_id=student.id, session_id=session.id, status="left_early"))
+        self.db.commit()
+
+        summary = report_service.build_class_summary("63HTTT", self.db)
+
+        self.assertEqual(summary[0]["attended"], 1)
+        self.assertEqual(summary[0]["absent"], 0)
+        self.assertEqual(summary[0]["rate"], 1.0)
 
     def test_dashboard_ignores_cross_class_attendance(self):
         student = self.add_student(class_name="63HTTT")

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from face_service import (
     aggregate_embeddings,
+    check_liveness,
     count_faces_in_image_bytes,
     embedding_count,
     image_bytes_to_embedding,
@@ -49,6 +50,17 @@ def register_face_samples(
         upload_name = _upload_name(upload)
         try:
             image_bytes = upload.file.read()
+            liveness_result = check_liveness(image_bytes)
+            if not liveness_result.get("liveness_passed", False):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "message": "Xác minh liveness thất bại",
+                        "filename": upload_name,
+                        "liveness_score": liveness_result.get("score"),
+                        "liveness_label": liveness_result.get("label"),
+                    },
+                )
             face_count = count_faces_in_image_bytes(image_bytes)
             if face_count == 0:
                 rejected_files.append({"filename": upload_name, "reason": "Không phát hiện khuôn mặt."})
@@ -57,6 +69,8 @@ def register_face_samples(
                 rejected_files.append({"filename": upload_name, "reason": f"Phát hiện nhiều khuôn mặt: {face_count}."})
                 continue
             embedding = image_bytes_to_embedding(image_bytes)
+        except HTTPException:
+            raise
         except Exception:
             rejected_files.append({"filename": upload_name, "reason": "Ảnh không hợp lệ hoặc không thể xử lý."})
             continue

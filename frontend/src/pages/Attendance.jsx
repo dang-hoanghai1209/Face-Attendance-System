@@ -28,7 +28,7 @@ const recognitionMessages = {
   unknown:  'Không nhận diện được sinh viên.',
   no_face:  'Không phát hiện khuôn mặt trong ảnh.',
   multiple_faces: 'Phát hiện nhiều khuôn mặt trong ảnh.',
-  spoof: 'Phát hiện ảnh giả mạo hoặc không hợp lệ (Spoof).',
+  spoof: 'Phát hiện giả mạo khuôn mặt. Vui lòng dùng khuôn mặt thật.',
 }
 const OFFICIAL_BLOCK_MESSAGE = 'Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức.'
 
@@ -41,7 +41,7 @@ const getStyle = (status) => {
   if (status === 'uncertain') return { bg: 'rgba(245,158,11,.14)', border: 'rgba(245,158,11,.45)', accent: '#fbbf24', text: '#f8fafc', muted: '#fde68a', label: 'Chưa đủ độ tin cậy' }
   if (status === 'no_face')   return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Không phát hiện khuôn mặt' }
   if (status === 'multiple_faces') return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Phát hiện nhiều khuôn mặt' }
-  if (status === 'spoof')     return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Xác thực ảnh thật thất bại (Spoof)' }
+  if (status === 'spoof')     return { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Phát hiện giả mạo khuôn mặt' }
   return                             { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Không nhận diện được' }
 }
 
@@ -273,8 +273,20 @@ export default function Attendance() {
       ctx.strokeRect(bbox.x, bbox.y, bbox.w, bbox.h)
 
       const name = face.full_name || face.student_code || 'Unknown'
-      const conf = face.confidence ? ` (${(face.confidence * 100).toFixed(0)}%)` : ''
-      const labelText = `${name}${conf}`
+      
+      let details = []
+      if (face.confidence) {
+        details.push(`${(face.confidence * 100).toFixed(0)}%`)
+      }
+      
+      if (face.liveness_score !== undefined && face.liveness_score !== null) {
+        details.push(`Liveness: ${(face.liveness_score * 100).toFixed(0)}%`)
+      } else if (face.liveness_score === null) {
+        details.push('Liveness: disabled')
+      }
+
+      const detailsText = details.length > 0 ? ` (${details.join(', ')})` : ''
+      const labelText = `${name}${detailsText}`
 
       ctx.fillStyle = color
       const fontSize = Math.max(14, Math.round(canvas.width / 35))
@@ -442,6 +454,7 @@ export default function Attendance() {
           official_attendance_warning_code,
           results,
           face_count,
+          liveness_score,
         } = recRes.data
         const recognizedStudent = student || null
         const recognizedCode = recognizedStudent?.student_code || student_code
@@ -453,20 +466,40 @@ export default function Attendance() {
           class_name: recognizedStudent?.class_name,
           confidence,
           status,
-          bbox: null
+          bbox: null,
+          liveness_score: liveness_score
         }] : [])
 
         if (activeResults.length > 0) {
           drawBoundingBoxes(activeResults)
         }
 
-        if (status === 'spoof') {
-          setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
-            confidence: confidence || 0, message: msg || 'Xác thực sinh trắc học (ảnh thật) thất bại.' })
-          setMessage(msg || 'Xác thực sinh trắc học thất bại. Vui lòng thử lại với camera trực tiếp.')
+        const hasSpoof = status === 'spoof' || activeResults.some(r => r.status === 'spoof')
+
+        if (hasSpoof) {
+          const spoofItem = activeResults.find(r => r.status === 'spoof') || {}
+          const finalScore = spoofItem.liveness_score !== undefined && spoofItem.liveness_score !== null
+            ? spoofItem.liveness_score
+            : liveness_score
+
+          setResult({
+            success: false,
+            status: 'spoof',
+            studentCode: recognizedCode || 'Không xác định',
+            student: recognizedStudent,
+            confidence: finalScore || 0,
+            livenessScore: finalScore,
+            message: 'Phát hiện giả mạo khuôn mặt. Vui lòng dùng khuôn mặt thật.'
+          })
+          setMessage('Phát hiện giả mạo khuôn mặt. Vui lòng dùng khuôn mặt thật.')
           if (window.innerWidth < 768) setMobileStep(4)
           return
         }
+
+        const primaryResult = activeResults.find(r => r.student_code === recognizedCode) || activeResults[0]
+        const finalLivenessScore = (primaryResult?.liveness_score !== undefined)
+          ? primaryResult.liveness_score
+          : liveness_score
 
         const classMismatch = isClassMismatchRecognition({
           reason,
@@ -487,7 +520,7 @@ export default function Attendance() {
             requiresManualConfirmation: true,
           })
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
-            confidence, message: classMismatchMessage })
+            confidence, livenessScore: finalLivenessScore, message: classMismatchMessage })
           setMessage(classMismatchMessage)
           if (window.innerWidth < 768) setMobileStep(4)
           return
@@ -495,7 +528,7 @@ export default function Attendance() {
 
         if (recognizedCode && official_attendance_allowed === false && blockMessage) {
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
-            confidence, message: blockMessage })
+            confidence, livenessScore: finalLivenessScore, message: blockMessage })
           setMessage(blockMessage)
           if (window.innerWidth < 768) setMobileStep(4)
           return
@@ -504,7 +537,7 @@ export default function Attendance() {
         if (status === 'success' && recognizedCode) {
           await postAttendanceAction(recognizedCode, confidence)
           setResult({ success: true, status, studentCode: recognizedCode, student: recognizedStudent, confidence, action,
-            message: `Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.` })
+            livenessScore: finalLivenessScore, message: `Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.` })
           setMessage(`Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.`)
           await loadSessionAttendance(sessionId)
           if (window.innerWidth < 768) setMobileStep(4)
@@ -512,13 +545,13 @@ export default function Attendance() {
         } else if (status === 'uncertain' && recognizedCode) {
           setPendingRecognition({ studentCode: recognizedCode, student: recognizedStudent, confidence, action })
           setResult({ success: false, status, studentCode: recognizedCode, student: recognizedStudent, confidence,
-            message: `${recognitionMessages[status]} Vui lòng xác nhận trước khi ghi nhận ${actionLabels[action]}.` })
+            livenessScore: finalLivenessScore, message: `${recognitionMessages[status]} Vui lòng xác nhận trước khi ghi nhận ${actionLabels[action]}.` })
           setMessage('Kết quả cần xác nhận. Kiểm tra thông tin sinh viên trước khi ghi nhận.')
           if (window.innerWidth < 768) setMobileStep(4)
 
         } else {
           setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
-            confidence, message: recognitionMessages[status] || msg })
+            confidence, livenessScore: finalLivenessScore, message: recognitionMessages[status] || msg })
           setMessage(recognitionMessages[status] || msg)
           if (window.innerWidth < 768) setMobileStep(4)
         }
@@ -782,6 +815,11 @@ export default function Attendance() {
                   {result.student?.full_name && <div><strong>Tên SV:</strong> {result.student.full_name}</div>}
                   {result.student?.class_name && <div><strong>Lớp:</strong> {result.student.class_name}</div>}
                   <div><strong>Độ tương đồng:</strong> {formatConf(result.confidence)}</div>
+                  {result.livenessScore !== undefined && (
+                    <div>
+                      <strong>Liveness:</strong> {result.livenessScore !== null ? `${(result.livenessScore * 100).toFixed(0)}%` : 'disabled'}
+                    </div>
+                  )}
                   {result.action && <div><strong>Hình thức:</strong> Điểm danh {actionLabels[result.action]}</div>}
                 </div>
               )}
@@ -973,6 +1011,9 @@ export default function Attendance() {
                     <p>Lớp: {result.student?.class_name || '-'}</p>
                     <p>Lớp chính của buổi học: {selectedSession?.class_name || selectedSession?.section_code || '-'}</p>
                     <p>Độ tin cậy: {formatConf(result.confidence)}</p>
+                    {result.livenessScore !== undefined && (
+                      <p>Liveness: {result.livenessScore !== null ? `${(result.livenessScore * 100).toFixed(0)}%` : 'disabled'}</p>
+                    )}
                     {result.success && result.action && (
                       <p>Trạng thái ghi nhận: Đã ghi nhận {actionLabels[result.action]}</p>
                     )}

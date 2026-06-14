@@ -45,14 +45,125 @@ const formatDT = (iso) => {
   return `${dd}/${mm} ${hh}:${min}`
 }
 
-const formatDateStr = (dateStr) => {
+const formatDateForDisplay = (dateStr) => {
   if (!dateStr) return ''
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
-  const parts = dateStr.split('-')
+  const parts = String(dateStr).split('-')
   if (parts.length === 3) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`
   }
   return dateStr
+}
+const formatDateStr = formatDateForDisplay
+
+const getSessionDateValue = (session) => session.session_date || session.date || ''
+const getSessionSubjectValue = (session) => session.subject_name || session.subject || ''
+const getSessionIdValue = (session) => session.id || session.session_id
+
+const getSessionDateTime = (session, timeField = 'start_time') => {
+  const sessionDate = getSessionDateValue(session)
+  const timeValue = session?.[timeField]
+  if (!sessionDate || !timeValue) return null
+  const [year, month, day] = String(sessionDate).split('-').map(Number)
+  const [hour, minute] = String(timeValue).split(':').map(Number)
+  return new Date(year, month - 1, day, hour || 0, minute || 0, 0)
+}
+
+const getSessionStatus = (session) => {
+  const start = getSessionDateTime(session, 'start_time')
+  const end = getSessionDateTime(session, 'end_time')
+  if (!start || !end) return { label: 'Không rõ', badgeClass: 'badge' }
+
+  const now = new Date()
+  if (now < start) return { label: 'Sắp diễn ra', badgeClass: 'badge info' }
+  if (now > end) return { label: 'Đã kết thúc', badgeClass: 'badge muted' }
+  return { label: 'Đang diễn ra', badgeClass: 'badge success' }
+}
+
+const getSessionGroupKey = (session) => {
+  if (session.section_id !== null && session.section_id !== undefined) return `section:${session.section_id}`
+  return [
+    session.section_code || '',
+    session.section_group || '',
+    session.class_name || '',
+    getSessionSubjectValue(session),
+  ].join('|')
+}
+
+const formatSectionLabel = (group) => [
+  group.section_code,
+  group.subject_name,
+  group.section_group ? `Nhóm ${group.section_group}` : '',
+  group.class_name ? `Lớp ${group.class_name}` : '',
+].filter(Boolean).join(' - ')
+
+const formatSessionOptionLabel = (session) => {
+  const status = getSessionStatus(session)
+  return `Buổi ${session.session_number || `#${getSessionIdValue(session)}`} - ${formatDateForDisplay(getSessionDateValue(session))} - ${status.label}`
+}
+
+const sortSessionsForPicker = (sessionsList) => [...sessionsList].sort((a, b) => {
+  const statusPriority = { 'Đang diễn ra': 0, 'Sắp diễn ra': 1, 'Đã kết thúc': 2, 'Không rõ': 3 }
+  const statusA = getSessionStatus(a).label
+  const statusB = getSessionStatus(b).label
+  const priorityDiff = (statusPriority[statusA] ?? 3) - (statusPriority[statusB] ?? 3)
+  if (priorityDiff !== 0) return priorityDiff
+
+  const timeA = getSessionDateTime(a, 'start_time')?.getTime() ?? 0
+  const timeB = getSessionDateTime(b, 'start_time')?.getTime() ?? 0
+  if (statusA === 'Đã kết thúc') return timeB - timeA
+  return timeA - timeB
+})
+
+const groupSessionsBySection = (sessionsList) => {
+  const groups = new Map()
+
+  sessionsList.forEach((session) => {
+    const key = getSessionGroupKey(session)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        section_id: session.section_id ?? null,
+        section_code: session.section_code || session.subject_code || '',
+        subject_name: getSessionSubjectValue(session),
+        section_group: session.section_group || '',
+        class_name: session.class_name || '',
+        sessions: [],
+      })
+    }
+    groups.get(key).sessions.push(session)
+  })
+
+  return Array.from(groups.values())
+    .map((group) => ({ ...group, sessions: sortSessionsForPicker(group.sessions) }))
+    .sort((a, b) => formatSectionLabel(a).localeCompare(formatSectionLabel(b), 'vi'))
+}
+
+const pickBestSessionInGroup = (groupSessions) => sortSessionsForPicker(groupSessions)[0] || null
+
+const pickBestInitialGroup = (groups) => {
+  const candidates = groups
+    .map((group) => ({ group, session: pickBestSessionInGroup(group.sessions) }))
+    .filter((item) => item.session)
+
+  const ongoing = candidates.find((item) => getSessionStatus(item.session).label === 'Đang diễn ra')
+  if (ongoing) return ongoing
+
+  const upcoming = candidates
+    .filter((item) => getSessionStatus(item.session).label === 'Sắp diễn ra')
+    .sort((a, b) => {
+      const timeA = getSessionDateTime(a.session, 'start_time')?.getTime() ?? Number.MAX_SAFE_INTEGER
+      const timeB = getSessionDateTime(b.session, 'start_time')?.getTime() ?? Number.MAX_SAFE_INTEGER
+      return timeA - timeB
+    })[0]
+  if (upcoming) return upcoming
+
+  return candidates
+    .sort((a, b) => {
+      const timeA = getSessionDateTime(a.session, 'start_time')?.getTime() ?? 0
+      const timeB = getSessionDateTime(b.session, 'start_time')?.getTime() ?? 0
+      return timeB - timeA
+    })[0] || null
 }
 
 /** 0.8734 → "87.3%" */
@@ -72,6 +183,7 @@ export default function Reports() {
   const [className,         setClassName]         = useState('')        // mặc định trống, user chọn
   const [warnings,          setWarnings]          = useState([])
   const [sessions,          setSessions]          = useState([])
+  const [selectedSectionKey, setSelectedSectionKey] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState('')
   const [sessionRows,       setSessionRows]       = useState([])
   const [error,             setError]             = useState('')
@@ -83,9 +195,36 @@ export default function Reports() {
   const [modelEvalLoading,  setModelEvalLoading]  = useState(false)
 
   const selectedSession = useMemo(
-    () => sessions.find((s) => String(s.id) === String(selectedSessionId)),
+    () => sessions.find((s) => String(getSessionIdValue(s)) === String(selectedSessionId)),
     [sessions, selectedSessionId],
   )
+
+  const groupedSections = useMemo(() => groupSessionsBySection(sessions), [sessions])
+
+  const selectedSection = useMemo(
+    () => groupedSections.find((group) => group.key === selectedSectionKey) || null,
+    [groupedSections, selectedSectionKey],
+  )
+
+  const selectedSectionSessions = selectedSection?.sessions || []
+
+  const applyBestSessionSelection = (sessionsList) => {
+    const best = pickBestInitialGroup(groupSessionsBySection(sessionsList))
+    if (best) {
+      setSelectedSectionKey(best.group.key)
+      setSelectedSessionId(String(getSessionIdValue(best.session)))
+    } else {
+      setSelectedSectionKey('')
+      setSelectedSessionId('')
+    }
+  }
+
+  const handleSectionChange = (sectionKey) => {
+    setSelectedSectionKey(sectionKey)
+    const group = groupedSections.find((item) => item.key === sectionKey)
+    const bestSession = group ? pickBestSessionInGroup(group.sessions) : null
+    setSelectedSessionId(bestSession ? String(getSessionIdValue(bestSession)) : '')
+  }
 
   const handleReportError = (err, fallback) => {
     if (err.response?.status === 403) {
@@ -127,8 +266,9 @@ export default function Reports() {
     try {
       const res = await api.get('/sessions/')
       setSessions(res.data)
-      if (!selectedSessionId && res.data.length > 0)
-        setSelectedSessionId(String(res.data[0].id))
+      if (!selectedSessionId) {
+        applyBestSessionSelection(res.data)
+      }
     } catch (err) {
       handleReportError(err, 'Không tải được danh sách buổi học.')
     }
@@ -176,8 +316,7 @@ export default function Reports() {
         const sessionRes = await api.get('/sessions/')
         if (!mounted) return
         setSessions(sessionRes.data)
-        if (sessionRes.data.length > 0)
-          setSelectedSessionId(String(sessionRes.data[0].id))
+        applyBestSessionSelection(sessionRes.data)
         if (isAdmin) await loadModelEvaluation()
       } catch (err) {
         if (mounted) handleReportError(err, 'Không tải được dữ liệu báo cáo.')
@@ -446,16 +585,30 @@ export default function Reports() {
       <section className="panel panel-pad">
         <h3>{user?.role === 'student' ? 'Lịch sử điểm danh cá nhân' : 'Báo cáo theo buổi học'}</h3>
 
-        <div className="toolbar" style={{ marginBottom: 16 }}>
+        <div className="toolbar" style={{ marginBottom: 16, alignItems: 'stretch' }}>
+          <select
+            value={selectedSectionKey}
+            onChange={(e) => handleSectionChange(e.target.value)}
+            style={{ minWidth: 280, flex: '1 1 280px' }}
+          >
+            <option value="">Chọn lớp học phần</option>
+            {groupedSections.map((group) => (
+              <option key={group.key} value={group.key}>
+                {formatSectionLabel(group)}
+              </option>
+            ))}
+          </select>
+
           <select
             value={selectedSessionId}
             onChange={(e) => setSelectedSessionId(e.target.value)}
-            style={{ minWidth: 320 }}
+            disabled={!selectedSectionKey}
+            style={{ minWidth: 260, flex: '1 1 260px' }}
           >
             <option value="">Chọn buổi học</option>
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>
-                #{s.id} — {s.class_name} — {s.subject} — {formatDateStr(s.session_date)}
+            {selectedSectionSessions.map((session) => (
+              <option key={getSessionIdValue(session)} value={getSessionIdValue(session)}>
+                {formatSessionOptionLabel(session)}
               </option>
             ))}
           </select>
@@ -483,10 +636,37 @@ export default function Reports() {
         </div>
 
         {selectedSession && (
-          <p style={{ marginBottom: 12 }}>
-            Buổi học #{selectedSession.id}: <strong>{selectedSession.class_name}</strong> —{' '}
-            {selectedSession.subject} — {formatDateStr(selectedSession.session_date)}
-          </p>
+          <div className="grid cards" style={{ marginBottom: 16 }}>
+            <div className="stat-card" style={{ minHeight: 92 }}>
+              <p>Lớp học phần</p>
+              <strong style={{ fontSize: 15, lineHeight: 1.3 }}>
+                {selectedSection ? formatSectionLabel(selectedSection) : [
+                  selectedSession.section_code,
+                  getSessionSubjectValue(selectedSession),
+                  selectedSession.section_group ? `Nhóm ${selectedSession.section_group}` : '',
+                  selectedSession.class_name ? `Lớp ${selectedSession.class_name}` : ''
+                ].filter(Boolean).join(' - ')}
+              </strong>
+            </div>
+            <div className="stat-card" style={{ minHeight: 92 }}>
+              <p>Buổi học</p>
+              <strong style={{ fontSize: 18 }}>
+                Buổi {selectedSession.session_number || `#${getSessionIdValue(selectedSession)}`}
+              </strong>
+            </div>
+            <div className="stat-card" style={{ minHeight: 92 }}>
+              <p>Ngày học</p>
+              <strong style={{ fontSize: 18 }}>{formatDateForDisplay(getSessionDateValue(selectedSession))}</strong>
+            </div>
+            <div className="stat-card" style={{ minHeight: 92 }}>
+              <p>Trạng thái</p>
+              <strong style={{ fontSize: 18 }}>{getSessionStatus(selectedSession).label}</strong>
+            </div>
+            <div className="stat-card" style={{ minHeight: 92 }}>
+              <p>Tổng sinh viên</p>
+              <strong>{sessionRows.length}</strong>
+            </div>
+          </div>
         )}
 
         {!sessions.length ? (

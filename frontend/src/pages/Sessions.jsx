@@ -437,6 +437,16 @@ export default function Sessions() {
     setMessage('')
   }
 
+  const handleDrawerEdit = (session) => {
+    handleEdit(session)
+    setSelectedGroupKey(null)
+    setDrawerFilter('all')
+    window.setTimeout(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      editDateRef.current?.focus()
+    }, 0)
+  }
+
   const handleDelete = (session) => {
     const label = `#${session.id} - ${session.class_name} - ${getSessionSubjectValue(session)}`
     setDeleteTarget({ ...session, label })
@@ -1183,10 +1193,7 @@ export default function Sessions() {
                         <button
                           className="secondary"
                           style={{ fontSize: 12, minHeight: 32, padding: '0 10px' }}
-                          onClick={() => {
-                            handleEdit(s);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }}
+                          onClick={() => handleDrawerEdit(s)}
                           disabled={loading}
                         >
                           Sửa

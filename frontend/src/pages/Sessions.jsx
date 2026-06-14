@@ -41,7 +41,7 @@ function hasErrors(e) { return Object.values(e).some(Boolean) }
 
 const toTimeInput = (value) => value ? String(value).slice(0, 5) : ''
 const formatTime = (value) => toTimeInput(value) || 'Chưa đặt giờ'
-const formatDateStr = (dateStr) => {
+const formatDateForDisplay = (dateStr) => {
   if (!dateStr) return ''
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
   const parts = dateStr.split('-')
@@ -50,6 +50,10 @@ const formatDateStr = (dateStr) => {
   }
   return dateStr
 }
+const formatDateStr = formatDateForDisplay
+
+const getSessionDateValue = (session) => session.session_date || session.date || ''
+const getSessionSubjectValue = (session) => session.subject_name || session.subject || ''
 
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
@@ -108,11 +112,12 @@ const getAlertCardStyle = (type) => {
 // Helpers for Session Status
 // ------------------------------------------------------------------ //
 const getSessionStatus = (session) => {
-  if (!session.session_date || !session.start_time || !session.end_time) {
+  const sessionDate = getSessionDateValue(session)
+  if (!sessionDate || !session.start_time || !session.end_time) {
     return { label: 'Không rõ', badgeClass: 'badge' }
   }
   const now = new Date()
-  const [year, month, day] = session.session_date.split('-').map(Number)
+  const [year, month, day] = sessionDate.split('-').map(Number)
   const parseTime = (timeStr) => {
     const parts = timeStr.split(':').map(Number)
     return { h: parts[0] || 0, m: parts[1] || 0 }
@@ -131,6 +136,42 @@ const getSessionStatus = (session) => {
   }
 }
 
+const getSessionGroupKey = (session) => {
+  if (session.section_id !== null && session.section_id !== undefined) return `section:${session.section_id}`
+  return [
+    session.section_code || '',
+    session.section_group || '',
+    session.class_name || '',
+    getSessionSubjectValue(session),
+  ].join('|')
+}
+
+const groupSessionsBySection = (sessionsList) => {
+  const groups = new Map()
+
+  sessionsList.forEach((session) => {
+    const key = getSessionGroupKey(session)
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        section_id: session.section_id ?? null,
+        section_code: session.section_code || session.subject_code || '',
+        subject_name: getSessionSubjectValue(session),
+        section_group: session.section_group || '',
+        class_name: session.class_name || '',
+        sessions: [],
+      })
+    }
+    groups.get(key).sessions.push(session)
+  })
+
+  return Array.from(groups.values()).sort((a, b) => {
+    const left = `${a.section_code} ${a.subject_name} ${a.section_group} ${a.class_name}`
+    const right = `${b.section_code} ${b.subject_name} ${b.section_group} ${b.class_name}`
+    return left.localeCompare(right, 'vi')
+  })
+}
+
 // ------------------------------------------------------------------ //
 // Component
 // ------------------------------------------------------------------ //
@@ -145,6 +186,111 @@ export default function Sessions() {
   const [loading,   setLoading]   = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [subjects, setSubjects] = useState([])
+
+  // State variables for course section grouping
+  const [viewMode, setViewMode] = useState('grouped')
+  const [selectedGroupKey, setSelectedGroupKey] = useState(null)
+  const [drawerFilter, setDrawerFilter] = useState('all')
+
+  const getGroupMetrics = (group) => {
+    let ongoing = 0;
+    let upcoming = 0;
+    let finished = 0;
+    group.sessions.forEach((s) => {
+      const status = getSessionStatus(s);
+      if (status.label === 'Đang diễn ra') ongoing++;
+      else if (status.label === 'Sắp diễn ra') upcoming++;
+      else if (status.label === 'Đã kết thúc') finished++;
+    });
+    return { ongoing, upcoming, finished, total: group.sessions.length };
+  };
+
+  const sortSessionsForDetail = (sessionsList) => {
+    const getSessionDateTime = (s) => {
+      const sessionDate = getSessionDateValue(s)
+      if (!sessionDate || !s.start_time) return new Date(0);
+      const [year, month, day] = sessionDate.split('-').map(Number);
+      const [h, m] = s.start_time.split(':').map(Number);
+      return new Date(year, month - 1, day, h, m, 0);
+    };
+
+    return [...sessionsList].sort((a, b) => {
+      const statusA = getSessionStatus(a).label;
+      const statusB = getSessionStatus(b).label;
+
+      const priority = {
+        'Đang diễn ra': 1,
+        'Sắp diễn ra': 2,
+        'Đã kết thúc': 3,
+        'Không rõ': 4
+      };
+
+      const pA = priority[statusA] || 4;
+      const pB = priority[statusB] || 4;
+
+      if (pA !== pB) {
+        return pA - pB;
+      }
+
+      const timeA = getSessionDateTime(a).getTime();
+      const timeB = getSessionDateTime(b).getTime();
+
+      if (statusA === 'Sắp diễn ra') {
+        return timeA - timeB;
+      } else if (statusA === 'Đã kết thúc') {
+        return timeB - timeA;
+      }
+      return timeA - timeB;
+    });
+  };
+
+  const groupedSessions = useMemo(() => {
+    return groupSessionsBySection(sessions);
+  }, [sessions]);
+
+  const filteredGroupedSessions = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return groupedSessions;
+    return groupedSessions.filter((g) =>
+      g.subject_name.toLowerCase().includes(keyword) ||
+      g.section_code.toLowerCase().includes(keyword) ||
+      g.section_group.toLowerCase().includes(keyword) ||
+      g.class_name.toLowerCase().includes(keyword)
+    );
+  }, [groupedSessions, search]);
+
+  const selectedGroup = useMemo(() => {
+    if (!selectedGroupKey) return null;
+    return groupedSessions.find(g => g.key === selectedGroupKey) || null;
+  }, [groupedSessions, selectedGroupKey]);
+
+  const selectedGroupTitle = useMemo(() => {
+    if (!selectedGroup) return ''
+    return [
+      selectedGroup.section_code,
+      selectedGroup.subject_name,
+      selectedGroup.section_group ? `Nhóm ${selectedGroup.section_group}` : '',
+      selectedGroup.class_name ? `Lớp ${selectedGroup.class_name}` : '',
+    ].filter(Boolean).join(' - ')
+  }, [selectedGroup])
+
+  const displaySessions = useMemo(() => {
+    if (!selectedGroup) return [];
+    const sorted = sortSessionsForDetail(selectedGroup.sessions);
+    return sorted.filter((s) => {
+      if (drawerFilter === 'all') return true;
+      const statusLabel = getSessionStatus(s).label;
+      if (drawerFilter === 'ongoing') return statusLabel === 'Đang diễn ra';
+      if (drawerFilter === 'upcoming') return statusLabel === 'Sắp diễn ra';
+      if (drawerFilter === 'finished') return statusLabel === 'Đã kết thúc';
+      return true;
+    });
+  }, [selectedGroup, drawerFilter]);
+
+  const openGroupDetails = (groupKey) => {
+    setDrawerFilter('all')
+    setSelectedGroupKey(groupKey)
+  }
 
   // Alert states
   const [alertCounts,       setAlertCounts]       = useState({})
@@ -218,10 +364,11 @@ export default function Sessions() {
     if (!keyword) return sessions
     return sessions.filter((s) =>
       String(s.id).includes(keyword) ||
-      s.subject?.toLowerCase().includes(keyword) ||
+      getSessionSubjectValue(s).toLowerCase().includes(keyword) ||
+      s.section_code?.toLowerCase().includes(keyword) ||
       s.class_name?.toLowerCase().includes(keyword) ||
       s.section_group?.toLowerCase().includes(keyword) ||
-      s.session_date?.includes(keyword)
+      getSessionDateValue(s).includes(keyword)
     )
   }, [sessions, search])
 
@@ -279,7 +426,7 @@ export default function Sessions() {
   const handleEdit = (session) => {
     setEditingId(session.id)
     setForm({
-      subject:      session.subject      || '',
+      subject:      getSessionSubjectValue(session),
       class_name:   session.class_name   || '',
       section_group: session.section_group || '',
       session_date: session.session_date || '',
@@ -291,7 +438,7 @@ export default function Sessions() {
   }
 
   const handleDelete = (session) => {
-    const label = `#${session.id} - ${session.class_name} - ${session.subject}`
+    const label = `#${session.id} - ${session.class_name} - ${getSessionSubjectValue(session)}`
     setDeleteTarget({ ...session, label })
   }
 
@@ -367,10 +514,10 @@ export default function Sessions() {
     if (!session.section_id) return '-'
     const group = sessions.filter(s => s.section_id === session.section_id)
     if (group.length === 0) return '-'
-    const sorted = [...group].sort((a, b) => new Date(a.session_date) - new Date(b.session_date))
-    const minDate = new Date(sorted[0].session_date)
+    const sorted = [...group].sort((a, b) => new Date(getSessionDateValue(a)) - new Date(getSessionDateValue(b)))
+    const minDate = new Date(getSessionDateValue(sorted[0]))
     const weekNumbers = group.map(s => {
-      const diffTime = new Date(s.session_date) - minDate
+      const diffTime = new Date(getSessionDateValue(s)) - minDate
       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
       return Math.floor(diffDays / 7) + 1
     })
@@ -574,51 +721,275 @@ export default function Sessions() {
       )}
 
       {/* Toolbar tìm kiếm & tải dữ liệu luôn hiển thị */}
-      <div className="toolbar" style={{ marginBottom: 16 }}>
-        <button className="secondary" onClick={loadSessions} disabled={loading}>
-          Tải lại dữ liệu
-        </button>
-        <input
-          placeholder="Tìm theo mã buổi, môn học, lớp hoặc ngày"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ minWidth: 280 }}
-        />
+      <div className="toolbar" style={{ marginBottom: 16, flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className={viewMode === 'grouped' ? '' : 'secondary'}
+            onClick={() => { setViewMode('grouped'); setSelectedGroupKey(null); }}
+          >
+            Theo lớp học phần
+          </button>
+          <button
+            className={viewMode === 'all' ? '' : 'secondary'}
+            onClick={() => { setViewMode('all'); setSelectedGroupKey(null); }}
+          >
+            Tất cả buổi học
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="secondary" onClick={loadSessions} disabled={loading}>
+            Tải lại dữ liệu
+          </button>
+          <input
+            placeholder={viewMode === 'grouped' ? "Tìm theo mã lớp HP, môn học, nhóm, lớp..." : "Tìm theo mã buổi, môn học, lớp hoặc ngày..."}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ minWidth: 280 }}
+          />
+        </div>
       </div>
 
       {message && <p className="status-message">{message}</p>}
 
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              {['Mã buổi', 'Môn học', 'Nhóm', 'Lớp', 'Trạng thái', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Tuần học', 'Thao tác'].map((h) => (
-                <th key={h}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSessions.map((session) => {
-              const status = getSessionStatus(session)
-              return (
-                <tr key={session.id}>
-                  <td>#{session.id}</td>
-                  <td>{session.subject}{session.session_number ? ` (Buổi ${session.session_number})` : ''}</td>
-                  <td style={{ fontWeight: 600, color: 'var(--teal)' }}>{session.section_group || '-'}</td>
-                  <td>{session.class_name}</td>
-                  <td>
-                    <span className={status.badgeClass}>
-                      {status.label}
-                    </span>
-                  </td>
-                  <td>{formatDateStr(session.session_date)}</td>
-                  <td>{formatTime(session.start_time)}</td>
-                  <td>{formatTime(session.end_time)}</td>
-                  <td style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '13px', color: 'var(--white2)' }}>
-                    {getWeeksStr(session)}
-                  </td>
-                  <td>
-                    <div className="toolbar">
+      {viewMode === 'grouped' ? (
+        <>
+          {/* Grouped Table View */}
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  {['Mã lớp HP', 'Môn học', 'Nhóm', 'Lớp', 'Tổng số buổi', 'Đang diễn ra', 'Sắp diễn ra', 'Đã kết thúc', 'Thao tác'].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredGroupedSessions.length === 0 ? (
+                  <tr>
+                    <td colSpan="9" style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted)' }}>
+                      Không có lớp học phần nào phù hợp.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredGroupedSessions.map((group) => {
+                    const metrics = getGroupMetrics(group);
+                    return (
+                      <tr key={group.key}>
+                        <td style={{ fontFamily: 'var(--mono)', fontWeight: 700 }}>{group.section_code || '-'}</td>
+                        <td style={{ fontWeight: 600 }}>{group.subject_name || '-'}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--teal)' }}>
+                          {group.section_group || '-'}
+                        </td>
+                        <td>{group.class_name}</td>
+                        <td>{metrics.total}</td>
+                        <td>
+                          <span className="badge success">{metrics.ongoing} đang diễn ra</span>
+                        </td>
+                        <td>
+                          <span className="badge info">{metrics.upcoming} sắp diễn ra</span>
+                        </td>
+                        <td>
+                          <span className="badge muted">{metrics.finished} đã kết thúc</span>
+                        </td>
+                        <td>
+                          <button
+                            className="secondary"
+                            onClick={() => openGroupDetails(group.key)}
+                          >
+                            Chi tiết
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Grouped Mobile View */}
+          <div className="mobile-card-list">
+            {filteredGroupedSessions.length === 0 ? (
+              <div className="empty-state">Không có lớp học phần nào phù hợp.</div>
+            ) : (
+              filteredGroupedSessions.map((group) => {
+                const metrics = getGroupMetrics(group);
+                return (
+                  <div key={group.key} className="mobile-card" style={{ border: '1px solid var(--bdr)' }}>
+                    <div className="mobile-card-header">
+                      <span className="mobile-card-title" style={{ color: 'var(--teal)', fontWeight: 700 }}>
+                        {group.section_code ? `${group.section_code} - ` : ''}{group.subject_name || '-'}
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Mã lớp HP:</span>
+                      <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>
+                        {group.section_code || '-'}
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Nhóm:</span>
+                      <span className="mobile-card-value" style={{ fontWeight: 600, color: 'var(--teal)' }}>
+                        {group.section_group || '-'}
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Lớp:</span>
+                      <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>
+                        {group.class_name}
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Số buổi học:</span>
+                      <span className="mobile-card-value">
+                        {metrics.total} buổi ({metrics.ongoing} đang, {metrics.upcoming} sắp, {metrics.finished} xong)
+                      </span>
+                    </div>
+                    <div className="mobile-card-actions">
+                      <button
+                        style={{ width: '100%', justifyContent: 'center' }}
+                        onClick={() => openGroupDetails(group.key)}
+                      >
+                        Chi tiết
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Original List Table View */}
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  {['Mã buổi', 'Môn học', 'Nhóm', 'Lớp', 'Trạng thái', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Tuần học', 'Thao tác'].map((h) => (
+                    <th key={h}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSessions.map((session) => {
+                  const status = getSessionStatus(session)
+                  return (
+                    <tr key={session.id}>
+                      <td>#{session.id}</td>
+                      <td>{getSessionSubjectValue(session)}{session.session_number ? ` (Buổi ${session.session_number})` : ''}</td>
+                      <td style={{ fontWeight: 600, color: 'var(--teal)' }}>{session.section_group || '-'}</td>
+                      <td>{session.class_name}</td>
+                      <td>
+                        <span className={status.badgeClass}>
+                          {status.label}
+                        </span>
+                      </td>
+                      <td>{formatDateForDisplay(getSessionDateValue(session))}</td>
+                      <td>{formatTime(session.start_time)}</td>
+                      <td>{formatTime(session.end_time)}</td>
+                      <td style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '13px', color: 'var(--white2)' }}>
+                        {session.week_pattern || session.week_display || getWeeksStr(session)}
+                      </td>
+                      <td>
+                        <div className="toolbar">
+                          <button
+                            className="secondary"
+                            onClick={() => handleOpenAlerts(session)}
+                            disabled={loading}
+                            style={{
+                              position: 'relative',
+                              borderColor: alertCounts[session.id] > 0 ? 'var(--red)' : 'var(--bdr)'
+                            }}
+                          >
+                            ⚠️ Cảnh báo
+                            {alertCounts[session.id] > 0 && (
+                              <span style={{
+                                position: 'absolute',
+                                top: -6,
+                                right: -6,
+                                background: 'var(--red)',
+                                color: '#fff',
+                                borderRadius: '50%',
+                                padding: '2px 6px',
+                                fontSize: 10,
+                                fontWeight: 'bold'
+                              }}>
+                                {alertCounts[session.id]}
+                              </span>
+                            )}
+                          </button>
+                          <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
+                            Sửa
+                          </button>
+                          <button
+                            className="secondary"
+                            style={{ background: 'rgba(244,63,94,.1)', border: '1px solid rgba(244,63,94,.25)', color: 'var(--red)' }}
+                            onClick={() => handleDelete(session)}
+                            disabled={loading}
+                          >
+                            Xóa
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Original Mobile Card Layout */}
+          <div className="mobile-card-list">
+            {filteredSessions.length === 0 ? (
+              <div className="empty-state">Không có buổi học phù hợp.</div>
+            ) : (
+              filteredSessions.map((session) => {
+                const status = getSessionStatus(session)
+                return (
+                  <div key={session.id} className="mobile-card">
+                    <div className="mobile-card-header">
+                      <span className="mobile-card-title" style={{ color: 'var(--teal)', fontWeight: 700 }}>
+                        {getSessionSubjectValue(session)}{session.session_number ? ` (Buổi ${session.session_number})` : ''}
+                      </span>
+                      <span className="badge success" style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>
+                        #{session.id}
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Nhóm:</span>
+                      <span className="mobile-card-value" style={{ fontWeight: 600, color: 'var(--teal)' }}>{session.section_group || '-'}</span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Lớp:</span>
+                      <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>{session.class_name}</span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Trạng thái:</span>
+                      <span className="mobile-card-value">
+                        <span className={status.badgeClass}>
+                          {status.label}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Ngày học:</span>
+                      <span className="mobile-card-value">{formatDateForDisplay(getSessionDateValue(session))}</span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Thời gian:</span>
+                      <span className="mobile-card-value">
+                        {formatTime(session.start_time)} - {formatTime(session.end_time)}
+                      </span>
+                    </div>
+                    <div className="mobile-card-row">
+                      <span className="mobile-card-label">Tuần học:</span>
+                      <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em' }}>
+                        {session.week_pattern || session.week_display || getWeeksStr(session)}
+                      </span>
+                    </div>
+                    <div className="mobile-card-actions">
                       <button
                         className="secondary"
                         onClick={() => handleOpenAlerts(session)}
@@ -649,114 +1020,213 @@ export default function Sessions() {
                         Sửa
                       </button>
                       <button
-                        className="secondary"
-                        style={{ background: 'rgba(244,63,94,.1)', border: '1px solid rgba(244,63,94,.25)', color: 'var(--red)' }}
+                        style={{ background: 'rgba(244,63,94,.1)', color: 'var(--red)', border: '1px solid rgba(244,63,94,.2)' }}
                         onClick={() => handleDelete(session)}
                         disabled={loading}
                       >
                         Xóa
                       </button>
                     </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </>
+      )}
 
-      {/* Mobile Card Layout */}
-      <div className="mobile-card-list">
-        {filteredSessions.length === 0 ? (
-          <div className="empty-state">Không có buổi học phù hợp.</div>
-        ) : (
-          filteredSessions.map((session) => {
-            const status = getSessionStatus(session)
-            return (
-              <div key={session.id} className="mobile-card">
-                <div className="mobile-card-header">
-                  <span className="mobile-card-title" style={{ color: 'var(--teal)', fontWeight: 700 }}>
-                    {session.subject}{session.session_number ? ` (Buổi ${session.session_number})` : ''}
-                  </span>
-                  <span className="badge success" style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>
-                    #{session.id}
-                  </span>
-                </div>
-                <div className="mobile-card-row">
-                  <span className="mobile-card-label">Nhóm:</span>
-                  <span className="mobile-card-value" style={{ fontWeight: 600, color: 'var(--teal)' }}>{session.section_group || '-'}</span>
-                </div>
-                <div className="mobile-card-row">
-                  <span className="mobile-card-label">Lớp:</span>
-                  <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>{session.class_name}</span>
-                </div>
-                <div className="mobile-card-row">
-                  <span className="mobile-card-label">Trạng thái:</span>
-                  <span className="mobile-card-value">
-                    <span className={status.badgeClass}>
-                      {status.label}
-                    </span>
-                  </span>
-                </div>
-                <div className="mobile-card-row">
-                  <span className="mobile-card-label">Ngày học:</span>
-                  <span className="mobile-card-value">{formatDateStr(session.session_date)}</span>
-                </div>
-                <div className="mobile-card-row">
-                  <span className="mobile-card-label">Thời gian:</span>
-                  <span className="mobile-card-value">
-                    {formatTime(session.start_time)} - {formatTime(session.end_time)}
-                  </span>
-                </div>
-                <div className="mobile-card-row">
-                  <span className="mobile-card-label">Tuần học:</span>
-                  <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em' }}>
-                    {getWeeksStr(session)}
-                  </span>
-                </div>
-                <div className="mobile-card-actions">
-                  <button
-                    className="secondary"
-                    onClick={() => handleOpenAlerts(session)}
-                    disabled={loading}
-                    style={{
-                      position: 'relative',
-                      borderColor: alertCounts[session.id] > 0 ? 'var(--red)' : 'var(--bdr)'
-                    }}
-                  >
-                    ⚠️ Cảnh báo
-                    {alertCounts[session.id] > 0 && (
-                      <span style={{
-                        position: 'absolute',
-                        top: -6,
-                        right: -6,
-                        background: 'var(--red)',
-                        color: '#fff',
-                        borderRadius: '50%',
-                        padding: '2px 6px',
-                        fontSize: 10,
-                        fontWeight: 'bold'
-                      }}>
-                        {alertCounts[session.id]}
-                      </span>
-                    )}
-                  </button>
-                  <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
-                    Sửa
-                  </button>
-                  <button
-                    style={{ background: 'rgba(244,63,94,.1)', color: 'var(--red)', border: '1px solid rgba(244,63,94,.2)' }}
-                    onClick={() => handleDelete(session)}
-                    disabled={loading}
-                  >
-                    Xóa
-                  </button>
-                </div>
+      {/* Detail Drawer (Right-aligned Slide-in Panel) */}
+      {selectedGroup && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.55)',
+            zIndex: 990,
+            display: 'flex',
+            justifyContent: 'flex-end',
+            animation: 'fadeIn 0.25s ease'
+          }}
+          onClick={() => setSelectedGroupKey(null)}
+        >
+          <div
+            style={{
+              width: 'min(520px, 100%)',
+              height: '100vh',
+              background: 'var(--navy2)',
+              borderLeft: '1px solid var(--bdr2)',
+              boxShadow: 'var(--shadow)',
+              display: 'flex',
+              flexDirection: 'column',
+              animation: 'slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--bdr)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18, color: 'var(--white)', fontWeight: 800 }}>
+                  {selectedGroupTitle || 'Chi tiết các buổi học'}
+                </h2>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--muted)' }}>
+                  Tổng số buổi: {selectedGroup.sessions.length}
+                </p>
               </div>
-            )
-          })
-        )}
-      </div>
+              <button
+                className="secondary"
+                onClick={() => setSelectedGroupKey(null)}
+                style={{ minHeight: 32, padding: '0 8px', fontSize: 18 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Tabs Filter */}
+            <div style={{ display: 'flex', gap: 6, padding: '12px 24px', borderBottom: '1px solid var(--bdr)', flexWrap: 'wrap' }}>
+              {[
+                { key: 'all', label: 'Tất cả' },
+                { key: 'ongoing', label: 'Đang diễn ra' },
+                { key: 'upcoming', label: 'Sắp diễn ra' },
+                { key: 'finished', label: 'Đã kết thúc' }
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  onClick={() => setDrawerFilter(tab.key)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    minHeight: 'auto',
+                    borderRadius: '20px',
+                    background: drawerFilter === tab.key ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
+                    borderColor: drawerFilter === tab.key ? 'rgba(0, 201, 167, 0.35)' : 'transparent',
+                    color: drawerFilter === tab.key ? 'var(--teal)' : 'var(--muted)',
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sessions list */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {displaySessions.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted)' }}>
+                  Không có buổi học nào ở trạng thái này.
+                </div>
+              ) : (
+                displaySessions.map((s) => {
+                  const status = getSessionStatus(s);
+                  const alertCount = alertCounts[s.id] || 0;
+                  return (
+                    <div
+                      key={s.id}
+                      style={{
+                        background: 'var(--card)',
+                        border: '1px solid var(--bdr)',
+                        borderRadius: 10,
+                        padding: 16,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                        transition: 'border-color 0.2s',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--white)' }}>
+                          {s.session_number ? `Buổi số ${s.session_number}` : `Buổi học #${s.id}`}
+                        </span>
+                        <span className={status.badgeClass} style={{ fontSize: 11 }}>
+                          {status.label}
+                        </span>
+                      </div>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--white2)' }}>
+                        <div>Ngày học: {formatDateForDisplay(getSessionDateValue(s))}</div>
+                        <div>⏰ Khung giờ: {formatTime(s.start_time)} - {formatTime(s.end_time)}</div>
+                        <div>📍 Phòng học: {s.room_name || '-'}</div>
+                        {s.note && <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>📝 Ghi chú: {s.note}</div>}
+                        <div style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '12px', marginTop: 4 }}>
+                          Tuần học: {s.week_pattern || s.week_display || getWeeksStr(s)}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--bdr)', paddingTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button
+                          className="secondary"
+                          onClick={() => handleOpenAlerts(s)}
+                          disabled={loading}
+                          style={{
+                            position: 'relative',
+                            fontSize: 12,
+                            minHeight: 32,
+                            padding: '0 10px',
+                            borderColor: alertCount > 0 ? 'var(--red)' : 'var(--bdr)'
+                          }}
+                        >
+                          ⚠️ Cảnh báo
+                          {alertCount > 0 && (
+                            <span style={{
+                              position: 'absolute',
+                              top: -6,
+                              right: -6,
+                              background: 'var(--red)',
+                              color: '#fff',
+                              borderRadius: '50%',
+                              padding: '2px 6px',
+                              fontSize: 10,
+                              fontWeight: 'bold'
+                            }}>
+                              {alertCount}
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          className="secondary"
+                          style={{ fontSize: 12, minHeight: 32, padding: '0 10px' }}
+                          onClick={() => {
+                            handleEdit(s);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          disabled={loading}
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          style={{
+                            fontSize: 12,
+                            minHeight: 32,
+                            padding: '0 10px',
+                            background: 'rgba(244,63,94,.1)',
+                            border: '1px solid rgba(244,63,94,.25)',
+                            color: 'var(--red)',
+                            marginLeft: 'auto'
+                          }}
+                          onClick={() => handleDelete(s)}
+                          disabled={loading}
+                        >
+                          Xóa
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Keyframes Injection */}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+      `}</style>
 
       {/* Security Alerts Modal */}
       {alertModalTarget && (

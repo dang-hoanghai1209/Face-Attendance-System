@@ -517,6 +517,8 @@ textarea { min-height: 90px; resize: vertical; }
     font-weight: 700;
     color: var(--white);
     font-size: 14px;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
   .mobile-card-row {
     display: flex;
@@ -531,11 +533,15 @@ textarea { min-height: 90px; resize: vertical; }
   .mobile-card-value {
     color: var(--white2);
     font-weight: 600;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
   }
   .mobile-card-actions {
     display: flex;
     gap: 8px;
     margin-top: 6px;
+    flex-wrap: wrap;
   }
   .mobile-card-actions button {
     flex: 1;

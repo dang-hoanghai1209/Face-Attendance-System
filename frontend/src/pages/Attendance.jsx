@@ -57,6 +57,16 @@ const formatDT = (iso) => {
   return `${dd}/${mm} ${hh}:${min}`
 }
 
+const formatDateStr = (dateStr) => {
+  if (!dateStr) return ''
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
+  const parts = dateStr.split('-')
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`
+  }
+  return dateStr
+}
+
 /** 0.8734 → "87.3%" */
 const formatConf = (v) =>
   typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '-'
@@ -823,7 +833,7 @@ export default function Attendance() {
                       Lớp: <span style={{ fontFamily: 'var(--mono)' }}>{s.class_name || s.section_code}</span>
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>📅 {s.session_date}</span>
+                      <span>📅 {formatDateStr(s.session_date)}</span>
                       <span>⏰ {s.start_time?.slice(0, 5)} - {s.end_time?.slice(0, 5)}</span>
                     </div>
                   </div>
@@ -1098,7 +1108,7 @@ export default function Attendance() {
                     <option value="">Chọn buổi học</option>
                     {sessions.map((s) => (
                       <option key={s.id || s.session_id} value={s.id || s.session_id}>
-                        #{s.id || s.session_id} — {s.class_name || s.section_code} — {s.subject || s.subject_name} — {s.session_date}
+                        #{s.id || s.session_id} — {s.class_name || s.section_code} — {s.subject || s.subject_name} — {formatDateStr(s.session_date)}
                       </option>
                     ))}
                   </select>

@@ -41,6 +41,15 @@ function hasErrors(e) { return Object.values(e).some(Boolean) }
 
 const toTimeInput = (value) => value ? String(value).slice(0, 5) : ''
 const formatTime = (value) => toTimeInput(value) || 'Chưa đặt giờ'
+const formatDateStr = (dateStr) => {
+  if (!dateStr) return ''
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
+  const parts = dateStr.split('-')
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`
+  }
+  return dateStr
+}
 
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
@@ -537,7 +546,7 @@ export default function Sessions() {
                       {status.label}
                     </span>
                   </td>
-                  <td>{session.session_date}</td>
+                  <td>{formatDateStr(session.session_date)}</td>
                   <td>{formatTime(session.start_time)}</td>
                   <td>{formatTime(session.end_time)}</td>
                   <td style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '13px', color: 'var(--white2)' }}>
@@ -626,7 +635,7 @@ export default function Sessions() {
                 </div>
                 <div className="mobile-card-row">
                   <span className="mobile-card-label">Ngày học:</span>
-                  <span className="mobile-card-value">{session.session_date}</span>
+                  <span className="mobile-card-value">{formatDateStr(session.session_date)}</span>
                 </div>
                 <div className="mobile-card-row">
                   <span className="mobile-card-label">Thời gian:</span>

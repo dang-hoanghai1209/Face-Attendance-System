@@ -45,6 +45,16 @@ const formatDT = (iso) => {
   return `${dd}/${mm} ${hh}:${min}`
 }
 
+const formatDateStr = (dateStr) => {
+  if (!dateStr) return ''
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
+  const parts = dateStr.split('-')
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`
+  }
+  return dateStr
+}
+
 /** 0.8734 → "87.3%" */
 const formatConf = (v) =>
   typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '-'
@@ -445,7 +455,7 @@ export default function Reports() {
             <option value="">Chọn buổi học</option>
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
-                #{s.id} — {s.class_name} — {s.subject} — {s.session_date}
+                #{s.id} — {s.class_name} — {s.subject} — {formatDateStr(s.session_date)}
               </option>
             ))}
           </select>
@@ -475,7 +485,7 @@ export default function Reports() {
         {selectedSession && (
           <p style={{ marginBottom: 12 }}>
             Buổi học #{selectedSession.id}: <strong>{selectedSession.class_name}</strong> —{' '}
-            {selectedSession.subject} — {selectedSession.session_date}
+            {selectedSession.subject} — {formatDateStr(selectedSession.session_date)}
           </p>
         )}
 

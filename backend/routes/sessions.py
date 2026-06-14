@@ -26,11 +26,12 @@ MISSING_GPS_MESSAGE = "Thiếu tọa độ GPS của buổi học"
 def _validate_class(v: Optional[str]) -> Optional[str]:
     if v is None:
         return v
-    if v not in VALID_CLASSES:
-        raise ValueError(
-            f"Lớp không hợp lệ. Chỉ chấp nhận: {', '.join(sorted(VALID_CLASSES))}."
-        )
-    return v
+    v_stripped = v.strip()
+    if not v_stripped:
+        raise ValueError("Tên lớp không được để trống.")
+    if len(v_stripped) > 50:
+        raise ValueError("Tên lớp không được dài quá 50 ký tự.")
+    return v_stripped
 
 
 def _validate_time_range(start_time: Optional[time], end_time: Optional[time]) -> None:

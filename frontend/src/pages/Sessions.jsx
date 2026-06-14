@@ -395,6 +395,11 @@ export default function Sessions() {
                 style={errors.class_name ? { borderColor: '#e53e3e' } : {}}
               >
                 <option value="">-- Chọn lớp --</option>
+                {form.class_name && !VALID_CLASSES.includes(form.class_name) && (
+                  <option value={form.class_name}>
+                    {form.class_name} (Hiện tại)
+                  </option>
+                )}
                 {VALID_CLASSES.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}

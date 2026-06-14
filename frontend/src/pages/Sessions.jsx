@@ -15,6 +15,11 @@ const initialForm = {
   start_time:   '',
   end_time:     '',
 }
+const initialModalForm = {
+  ...initialForm,
+  room_name: '',
+  note: '',
+}
 const emptyErrors = {
   subject:    '',
   class_name: '',
@@ -186,6 +191,11 @@ export default function Sessions() {
   const [loading,   setLoading]   = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [subjects, setSubjects] = useState([])
+  const [editModalTarget, setEditModalTarget] = useState(null)
+  const [editModalForm, setEditModalForm] = useState(initialModalForm)
+  const [editModalErrors, setEditModalErrors] = useState(emptyErrors)
+  const [editModalMessage, setEditModalMessage] = useState('')
+  const [editModalSaving, setEditModalSaving] = useState(false)
 
   // State variables for course section grouping
   const [viewMode, setViewMode] = useState('grouped')
@@ -383,27 +393,49 @@ export default function Sessions() {
     setErrors((prev) => ({ ...prev, [field]: '' }))
   }
 
-  const handleSubmit = async () => {
-    const validationErrors = validateForm(form)
-    if (hasErrors(validationErrors)) {
-      setErrors(validationErrors)
-      return
-    }
+  const handleEditModalChange = (field, value) => {
+    setEditModalForm((prev) => ({ ...prev, [field]: value }))
+    setEditModalErrors((prev) => ({ ...prev, [field]: '' }))
+    setEditModalMessage('')
+  }
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.session_date)) {
-      setErrors((prev) => ({ ...prev, session_date: 'Ngày học không hợp lệ. Vui lòng chọn ngày từ lịch.' }))
-      return
-    }
-
+  const buildSessionPayload = (source) => {
     const payload = {
-      subject:      form.subject.trim(),
-      class_name:   form.class_name,
-      section_group: form.section_group ? form.section_group.trim() : null,
-      session_date: form.session_date,
-      start_time:   form.start_time,
-      end_time:     form.end_time,
+      subject:      source.subject.trim(),
+      class_name:   source.class_name,
+      section_group: source.section_group ? source.section_group.trim() : null,
+      session_date: source.session_date,
+      start_time:   source.start_time,
+      end_time:     source.end_time,
       created_by:   null,
     }
+    if (Object.prototype.hasOwnProperty.call(source, 'room_name')) {
+      payload.room_name = source.room_name ? source.room_name.trim() : null
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'note')) {
+      payload.note = source.note ? source.note.trim() : null
+    }
+    return payload
+  }
+
+  const validateSessionForm = (source, setErrorState) => {
+    const validationErrors = validateForm(source)
+    if (hasErrors(validationErrors)) {
+      setErrorState(validationErrors)
+      return false
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(source.session_date)) {
+      setErrorState((prev) => ({ ...prev, session_date: 'Ngày học không hợp lệ. Vui lòng chọn ngày từ lịch.' }))
+      return false
+    }
+    return true
+  }
+
+  const handleSubmit = async () => {
+    if (!validateSessionForm(form, setErrors)) return
+
+    const payload = buildSessionPayload(form)
 
     setLoading(true)
     try {
@@ -437,14 +469,54 @@ export default function Sessions() {
     setMessage('')
   }
 
-  const handleDrawerEdit = (session) => {
-    handleEdit(session)
-    setSelectedGroupKey(null)
-    setDrawerFilter('all')
-    window.setTimeout(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-      editDateRef.current?.focus()
-    }, 0)
+  const openEditModal = (session) => {
+    setEditModalTarget(session)
+    setEditModalForm({
+      subject: getSessionSubjectValue(session),
+      class_name: session.class_name || '',
+      section_group: session.section_group || '',
+      session_date: getSessionDateValue(session),
+      start_time: toTimeInput(session.start_time),
+      end_time: toTimeInput(session.end_time),
+      room_name: session.room_name || '',
+      note: session.note || '',
+    })
+    setEditModalErrors(emptyErrors)
+    setEditModalMessage('')
+  }
+
+  const closeEditModal = () => {
+    setEditModalTarget(null)
+    setEditModalForm(initialModalForm)
+    setEditModalErrors(emptyErrors)
+    setEditModalMessage('')
+  }
+
+  const submitEditModal = async () => {
+    if (!editModalTarget) return
+    if (!validateSessionForm(editModalForm, setEditModalErrors)) return
+
+    setEditModalSaving(true)
+    setEditModalMessage('')
+    try {
+      const payload = buildSessionPayload(editModalForm)
+      const response = await api.put(`/sessions/${editModalTarget.id}`, payload)
+      const updatedSession = {
+        ...editModalTarget,
+        ...response.data,
+        room_name: response.data.room_name ?? editModalForm.room_name,
+        note: response.data.note ?? editModalForm.note,
+      }
+      setSessions((prev) => prev.map((session) => (
+        session.id === editModalTarget.id ? { ...session, ...updatedSession } : session
+      )))
+      setMessage('Cập nhật buổi học thành công.')
+      closeEditModal()
+    } catch (error) {
+      setEditModalMessage(getApiErrorMessage(error, 'Không cập nhật được buổi học.'))
+    } finally {
+      setEditModalSaving(false)
+    }
   }
 
   const handleDelete = (session) => {
@@ -1193,7 +1265,7 @@ export default function Sessions() {
                         <button
                           className="secondary"
                           style={{ fontSize: 12, minHeight: 32, padding: '0 10px' }}
-                          onClick={() => handleDrawerEdit(s)}
+                          onClick={() => openEditModal(s)}
                           disabled={loading}
                         >
                           Sửa
@@ -1218,6 +1290,178 @@ export default function Sessions() {
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editModalTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1005,
+            padding: 12,
+            animation: 'fadeIn 0.2s ease'
+          }}
+        >
+          <div
+            style={{
+              width: 'min(680px, 100%)',
+              maxHeight: '92vh',
+              background: 'var(--navy2)',
+              border: '1px solid var(--bdr2)',
+              borderRadius: 12,
+              padding: '20px 16px',
+              boxShadow: 'var(--shadow)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              overflowY: 'auto'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--bdr)', paddingBottom: 10, gap: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, color: 'var(--white)' }}>Chỉnh sửa buổi học</h3>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+                  {[
+                    editModalTarget.session_number ? `Buổi số ${editModalTarget.session_number}` : `Buổi #${editModalTarget.id}`,
+                    getSessionSubjectValue(editModalTarget),
+                    editModalTarget.section_group ? `Nhóm ${editModalTarget.section_group}` : '',
+                    editModalTarget.class_name ? `Lớp ${editModalTarget.class_name}` : ''
+                  ].filter(Boolean).join(' - ')}
+                </p>
+              </div>
+              <button
+                className="secondary"
+                onClick={closeEditModal}
+                disabled={editModalSaving}
+                style={{ minHeight: 32, padding: '0 8px', fontSize: 18 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {editModalMessage && (
+              <p
+                style={{
+                  margin: 0,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  background: 'rgba(244, 63, 94, 0.08)',
+                  border: '1px solid rgba(244, 63, 94, 0.2)',
+                  color: 'var(--red)',
+                  lineHeight: 1.4
+                }}
+              >
+                {editModalMessage}
+              </p>
+            )}
+
+            <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Môn học / Lớp học phần</label>
+                <input
+                  value={editModalForm.subject}
+                  readOnly
+                  style={{ opacity: 0.78, cursor: 'not-allowed', background: 'rgba(255,255,255,0.05)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Lớp sinh viên</label>
+                <input
+                  value={editModalForm.class_name}
+                  readOnly
+                  style={{ opacity: 0.78, cursor: 'not-allowed', background: 'rgba(255,255,255,0.05)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Nhóm học phần</label>
+                <input
+                  value={editModalForm.section_group}
+                  readOnly
+                  style={{ opacity: 0.78, cursor: 'not-allowed', background: 'rgba(255,255,255,0.05)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Ngày học</label>
+                <input
+                  type="date"
+                  value={editModalForm.session_date || ''}
+                  onChange={(e) => handleEditModalChange('session_date', e.target.value)}
+                  style={editModalErrors.session_date ? { borderColor: '#e53e3e' } : {}}
+                />
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  Hiển thị: {formatDateForDisplay(editModalForm.session_date) || '-'}
+                </span>
+                {editModalErrors.session_date && (
+                  <span style={{ fontSize: 12, color: '#e53e3e' }}>{editModalErrors.session_date}</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Giờ bắt đầu</label>
+                <input
+                  type="time"
+                  value={editModalForm.start_time}
+                  onChange={(e) => handleEditModalChange('start_time', e.target.value)}
+                  style={editModalErrors.start_time ? { borderColor: '#e53e3e' } : {}}
+                />
+                {editModalErrors.start_time && (
+                  <span style={{ fontSize: 12, color: '#e53e3e' }}>{editModalErrors.start_time}</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Giờ kết thúc</label>
+                <input
+                  type="time"
+                  value={editModalForm.end_time}
+                  onChange={(e) => handleEditModalChange('end_time', e.target.value)}
+                  style={editModalErrors.end_time ? { borderColor: '#e53e3e' } : {}}
+                />
+                {editModalErrors.end_time && (
+                  <span style={{ fontSize: 12, color: '#e53e3e' }}>{editModalErrors.end_time}</span>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Phòng học</label>
+                <input
+                  value={editModalForm.room_name}
+                  onChange={(e) => handleEditModalChange('room_name', e.target.value)}
+                  placeholder="Phòng học"
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, gridColumn: '1 / -1' }}>
+                <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Ghi chú</label>
+                <textarea
+                  value={editModalForm.note}
+                  onChange={(e) => handleEditModalChange('note', e.target.value)}
+                  placeholder="Ghi chú buổi học"
+                  style={{ minHeight: 80 }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: '1px solid var(--bdr)', paddingTop: 12, flexWrap: 'wrap' }}>
+              <button className="secondary" onClick={closeEditModal} disabled={editModalSaving}>
+                Hủy / Đóng
+              </button>
+              <button onClick={submitEditModal} disabled={editModalSaving}>
+                {editModalSaving ? 'Đang cập nhật...' : 'Cập nhật buổi học'}
+              </button>
             </div>
           </div>
         </div>

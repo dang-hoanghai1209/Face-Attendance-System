@@ -51,32 +51,6 @@ const formatDateStr = (dateStr) => {
   return dateStr
 }
 
-const parseDisplayDateToISO = (displayStr) => {
-  if (!displayStr) return ''
-  const trimmed = displayStr.trim()
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
-    const [d, m, y] = trimmed.split('/')
-    return `${y}-${m}-${d}`
-  }
-  return trimmed
-}
-
-const formatToDateMask = (value) => {
-  let clean = value.replace(/\D/g, '')
-  if (clean.length > 8) clean = clean.slice(0, 8)
-  let formatted = ''
-  if (clean.length > 0) {
-    formatted = clean.slice(0, 2)
-    if (clean.length > 2) {
-      formatted += '/' + clean.slice(2, 4)
-      if (clean.length > 4) {
-        formatted += '/' + clean.slice(4, 8)
-      }
-    }
-  }
-  return formatted
-}
-
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
 // ------------------------------------------------------------------ //
@@ -269,9 +243,8 @@ export default function Sessions() {
       return
     }
 
-    const isoDate = parseDisplayDateToISO(form.session_date)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
-      setErrors((prev) => ({ ...prev, session_date: 'Ngày học không hợp lệ. Vui lòng nhập đúng định dạng dd/mm/yyyy (vd: 15/06/2026).' }))
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(form.session_date)) {
+      setErrors((prev) => ({ ...prev, session_date: 'Ngày học không hợp lệ. Vui lòng chọn ngày từ lịch.' }))
       return
     }
 
@@ -279,7 +252,7 @@ export default function Sessions() {
       subject:      form.subject.trim(),
       class_name:   form.class_name,
       section_group: form.section_group ? form.section_group.trim() : null,
-      session_date: isoDate,
+      session_date: form.session_date,
       start_time:   form.start_time,
       end_time:     form.end_time,
       created_by:   null,
@@ -309,7 +282,7 @@ export default function Sessions() {
       subject:      session.subject      || '',
       class_name:   session.class_name   || '',
       section_group: session.section_group || '',
-      session_date: formatDateStr(session.session_date) || '',
+      session_date: session.session_date || '',
       start_time:   toTimeInput(session.start_time),
       end_time:     toTimeInput(session.end_time),
     })
@@ -495,10 +468,20 @@ export default function Sessions() {
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                 <input
                   type="text"
-                  placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
-                  value={form.session_date}
-                  onChange={(e) => handleChange('session_date', formatToDateMask(e.target.value))}
-                  style={errors.session_date ? { borderColor: '#e53e3e', paddingRight: '40px', width: '100%' } : { paddingRight: '40px', width: '100%' }}
+                  placeholder="Chọn ngày học từ lịch"
+                  value={formatDateStr(form.session_date)}
+                  readOnly
+                  onClick={() => {
+                    try {
+                      editDateRef.current?.showPicker();
+                    } catch (e) {
+                      try {
+                        editDateRef.current?.focus();
+                        editDateRef.current?.click();
+                      } catch (err) {}
+                    }
+                  }}
+                  style={errors.session_date ? { borderColor: '#e53e3e', paddingRight: '40px', width: '100%', cursor: 'pointer' } : { paddingRight: '40px', width: '100%', cursor: 'pointer' }}
                 />
                 <button
                   type="button"
@@ -506,7 +489,10 @@ export default function Sessions() {
                     try {
                       editDateRef.current?.showPicker();
                     } catch (e) {
-                      editDateRef.current?.click();
+                      try {
+                        editDateRef.current?.focus();
+                        editDateRef.current?.click();
+                      } catch (err) {}
                     }
                   }}
                   style={{
@@ -531,6 +517,8 @@ export default function Sessions() {
                 <input
                   type="date"
                   ref={editDateRef}
+                  value={form.session_date || ''}
+                  onChange={(e) => handleChange('session_date', e.target.value)}
                   style={{
                     position: 'absolute',
                     right: '10px',
@@ -539,13 +527,6 @@ export default function Sessions() {
                     opacity: 0,
                     pointerEvents: 'none',
                     zIndex: 1
-                  }}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    if (val) {
-                      const [y, m, d] = val.split('-')
-                      handleChange('session_date', `${d}/${m}/${y}`)
-                    }
                   }}
                 />
               </div>

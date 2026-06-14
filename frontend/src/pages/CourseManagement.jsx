@@ -4,30 +4,13 @@ import api from '../../api/axios.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { VALID_CLASSES } from '../constants/classes.js'
 
-const parseDisplayDateToISO = (displayStr) => {
-  if (!displayStr) return ''
-  const trimmed = displayStr.trim()
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
-    const [d, m, y] = trimmed.split('/')
-    return `${y}-${m}-${d}`
+const formatDateForDisplay = (isoDate) => {
+  if (!isoDate) return ''
+  const parts = isoDate.split('-')
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`
   }
-  return trimmed
-}
-
-const formatToDateMask = (value) => {
-  let clean = value.replace(/\D/g, '')
-  if (clean.length > 8) clean = clean.slice(0, 8)
-  let formatted = ''
-  if (clean.length > 0) {
-    formatted = clean.slice(0, 2)
-    if (clean.length > 2) {
-      formatted += '/' + clean.slice(2, 4)
-      if (clean.length > 4) {
-        formatted += '/' + clean.slice(4, 8)
-      }
-    }
-  }
-  return formatted
+  return isoDate
 }
 
 export default function CourseManagement() {
@@ -372,9 +355,8 @@ export default function CourseManagement() {
       notify('Vui lòng điền hoặc chọn đúng tên phòng học đã được cấu hình GPS và điền đầy đủ các thông tin.', 'error')
       return
     }
-    const isoDate = parseDisplayDateToISO(schedForm.session_date)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
-      notify('Ngày học không hợp lệ. Vui lòng nhập đúng định dạng dd/mm/yyyy (vd: 15/06/2026).', 'error')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(schedForm.session_date)) {
+      notify('Ngày học không hợp lệ. Vui lòng chọn ngày từ lịch.', 'error')
       return
     }
     if (schedForm.end_time <= schedForm.start_time) {
@@ -391,7 +373,7 @@ export default function CourseManagement() {
     const payload = {
       section_id: parseInt(schedForm.section_id, 10),
       classroom_id: parseInt(schedForm.classroom_id, 10),
-      session_date: isoDate,
+      session_date: schedForm.session_date,
       start_time: schedForm.start_time + (schedForm.start_time.length === 5 ? ':00' : ''),
       end_time: schedForm.end_time + (schedForm.end_time.length === 5 ? ':00' : ''),
       note: schedForm.note.trim() || null,
@@ -1156,10 +1138,20 @@ export default function CourseManagement() {
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                   <input
                     type="text"
-                    placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
-                    value={schedForm.session_date}
-                    onChange={(e) => setSchedForm({ ...schedForm, session_date: formatToDateMask(e.target.value) })}
-                    style={{ paddingRight: '40px', width: '100%' }}
+                    placeholder="Chọn ngày học từ lịch"
+                    value={formatDateForDisplay(schedForm.session_date)}
+                    readOnly
+                    onClick={() => {
+                      try {
+                        schedDateRef.current?.showPicker();
+                      } catch (e) {
+                        try {
+                          schedDateRef.current?.focus();
+                          schedDateRef.current?.click();
+                        } catch (err) {}
+                      }
+                    }}
+                    style={{ paddingRight: '40px', width: '100%', cursor: 'pointer' }}
                   />
                   <button
                     type="button"
@@ -1167,7 +1159,10 @@ export default function CourseManagement() {
                       try {
                         schedDateRef.current?.showPicker();
                       } catch (e) {
-                        schedDateRef.current?.click();
+                        try {
+                          schedDateRef.current?.focus();
+                          schedDateRef.current?.click();
+                        } catch (err) {}
                       }
                     }}
                     style={{
@@ -1192,6 +1187,8 @@ export default function CourseManagement() {
                   <input
                     type="date"
                     ref={schedDateRef}
+                    value={schedForm.session_date || ''}
+                    onChange={(e) => setSchedForm(prev => ({ ...prev, session_date: e.target.value }))}
                     style={{
                       position: 'absolute',
                       right: '10px',
@@ -1200,13 +1197,6 @@ export default function CourseManagement() {
                       opacity: 0,
                       pointerEvents: 'none',
                       zIndex: 1
-                    }}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      if (val) {
-                        const [y, m, d] = val.split('-')
-                        setSchedForm(prev => ({ ...prev, session_date: `${d}/${m}/${y}` }))
-                      }
                     }}
                   />
                 </div>

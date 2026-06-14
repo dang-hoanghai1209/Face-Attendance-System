@@ -132,6 +132,7 @@ export default function Sessions() {
   const [message,   setMessage]   = useState('')
   const [loading,   setLoading]   = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [subjects, setSubjects] = useState([])
 
   // Alert states
   const [alertCounts,       setAlertCounts]       = useState({})
@@ -167,11 +168,15 @@ export default function Sessions() {
 
   const loadSessions = async () => {
     try {
-      const response = await api.get('/sessions/')
-      setSessions(response.data)
-      loadAlertCounts(response.data)
+      const [resSessions, resSubjects] = await Promise.all([
+        api.get('/sessions/'),
+        api.get('/subjects/')
+      ])
+      setSessions(resSessions.data)
+      setSubjects(resSubjects.data)
+      loadAlertCounts(resSessions.data)
     } catch (error) {
-      setMessage(getApiErrorMessage(error, 'Không tải được danh sách buổi học.'))
+      setMessage(getApiErrorMessage(error, 'Không tải được danh sách dữ liệu.'))
     }
   }
 
@@ -179,13 +184,17 @@ export default function Sessions() {
     let mounted = true
     const load = async () => {
       try {
-        const response = await api.get('/sessions/')
+        const [resSessions, resSubjects] = await Promise.all([
+          api.get('/sessions/'),
+          api.get('/subjects/')
+        ])
         if (mounted) {
-          setSessions(response.data)
-          loadAlertCounts(response.data)
+          setSessions(resSessions.data)
+          setSubjects(resSubjects.data)
+          loadAlertCounts(resSessions.data)
         }
       } catch (error) {
-        if (mounted) setMessage(getApiErrorMessage(error, 'Không tải được danh sách buổi học.'))
+        if (mounted) setMessage(getApiErrorMessage(error, 'Không tải được danh sách dữ liệu.'))
       }
     }
     load()
@@ -356,12 +365,23 @@ export default function Sessions() {
           <div className="form-grid" style={{ marginBottom: 12 }}>
             {/* Môn học */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <input
-                placeholder="Môn học"
+              <select
                 value={form.subject}
                 onChange={(e) => handleChange('subject', e.target.value)}
                 style={errors.subject ? { borderColor: '#e53e3e' } : {}}
-              />
+              >
+                <option value="">-- Chọn môn học --</option>
+                {form.subject && !subjects.some((sb) => sb.subject_name === form.subject) && (
+                  <option value={form.subject}>
+                    {form.subject} (Hiện tại)
+                  </option>
+                )}
+                {subjects.map((sb) => (
+                  <option key={sb.id} value={sb.subject_name}>
+                    {sb.subject_name} ({sb.subject_code})
+                  </option>
+                ))}
+              </select>
               {errors.subject && (
                 <span style={{ fontSize: 12, color: '#e53e3e' }}>{errors.subject}</span>
               )}

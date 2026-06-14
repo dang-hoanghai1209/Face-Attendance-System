@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import api from '../../api/axios.js'
 import { VALID_CLASSES } from '../constants/classes.js'
@@ -149,6 +149,7 @@ export default function Sessions() {
   const [form,      setForm]      = useState(initialForm)
   const [errors,    setErrors]    = useState(emptyErrors)
   const [editingId, setEditingId] = useState(null)
+  const editDateRef = useRef(null)
   const [search,    setSearch]    = useState('')
   const [message,   setMessage]   = useState('')
   const [loading,   setLoading]   = useState(false)
@@ -475,13 +476,63 @@ export default function Sessions() {
 
             {/* Ngày học */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <input
-                type="text"
-                placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
-                value={form.session_date}
-                onChange={(e) => handleChange('session_date', e.target.value)}
-                style={errors.session_date ? { borderColor: '#e53e3e' } : {}}
-              />
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
+                  value={form.session_date}
+                  onChange={(e) => handleChange('session_date', e.target.value)}
+                  style={errors.session_date ? { borderColor: '#e53e3e', paddingRight: '40px', width: '100%' } : { paddingRight: '40px', width: '100%' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      editDateRef.current?.showPicker();
+                    } catch (e) {
+                      editDateRef.current?.click();
+                    }
+                  }}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--muted)',
+                    minHeight: 'auto',
+                    fontSize: '16px',
+                    zIndex: 2
+                  }}
+                  title="Chọn ngày từ lịch"
+                >
+                  📅
+                </button>
+                <input
+                  type="date"
+                  ref={editDateRef}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    width: '24px',
+                    height: '24px',
+                    opacity: 0,
+                    pointerEvents: 'none',
+                    zIndex: 1
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val) {
+                      const [y, m, d] = val.split('-')
+                      handleChange('session_date', `${d}/${m}/${y}`)
+                    }
+                  }}
+                />
+              </div>
               {errors.session_date && (
                 <span style={{ fontSize: 12, color: '#e53e3e' }}>{errors.session_date}</span>
               )}

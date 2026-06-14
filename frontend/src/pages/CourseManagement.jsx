@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/axios.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
@@ -19,6 +19,7 @@ export default function CourseManagement() {
   const [activeTab, setActiveTab] = useState('classrooms')
   const [message, setMessage] = useState('')
   const [msgType, setMsgType] = useState('ok')
+  const schedDateRef = useRef(null)
 
   const notify = useCallback((msg, type = 'ok') => {
     setMessage(msg)
@@ -1136,12 +1137,63 @@ export default function CourseManagement() {
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
                   Ngày học (Ngày bắt đầu)
                 </label>
-                <input
-                  type="text"
-                  placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
-                  value={schedForm.session_date}
-                  onChange={(e) => setSchedForm({ ...schedForm, session_date: e.target.value })}
-                />
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
+                    value={schedForm.session_date}
+                    onChange={(e) => setSchedForm({ ...schedForm, session_date: e.target.value })}
+                    style={{ paddingRight: '40px', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        schedDateRef.current?.showPicker();
+                      } catch (e) {
+                        schedDateRef.current?.click();
+                      }
+                    }}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--muted)',
+                      minHeight: 'auto',
+                      fontSize: '16px',
+                      zIndex: 2
+                    }}
+                    title="Chọn ngày từ lịch"
+                  >
+                    📅
+                  </button>
+                  <input
+                    type="date"
+                    ref={schedDateRef}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      width: '24px',
+                      height: '24px',
+                      opacity: 0,
+                      pointerEvents: 'none',
+                      zIndex: 1
+                    }}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      if (val) {
+                        const [y, m, d] = val.split('-')
+                        setSchedForm(prev => ({ ...prev, session_date: `${d}/${m}/${y}` }))
+                      }
+                    }}
+                  />
+                </div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

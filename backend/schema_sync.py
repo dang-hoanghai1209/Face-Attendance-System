@@ -508,6 +508,19 @@ def sync_schema(engine):
             connection.execute(text("UPDATE sessions SET end_time = '09:00:00' WHERE end_time IS NULL"))
             connection.execute(text("UPDATE sessions SET radius_meters = 50 WHERE radius_meters IS NULL"))
 
+        if "course_sections" in tables:
+            columns = _get_columns(inspector, "course_sections")
+            if "class_name" not in columns:
+                connection.execute(text("ALTER TABLE course_sections ADD COLUMN class_name VARCHAR(50)"))
+                columns.add("class_name")
+                connection.execute(text(
+                    "UPDATE course_sections "
+                    "SET class_name = REPLACE(REPLACE(section_code, '-', ''), ' ', '') "
+                    "WHERE (class_name IS NULL OR class_name = '') "
+                    "  AND REPLACE(REPLACE(section_code, '-', ''), ' ', '') IN "
+                    "('63TTQL', '63HTTT', '63CNTT', '63LFW', '64TTQL', '64HTTT', '64CNTT', '64LFW')"
+                ))
+
         if "attendance" in tables:
             _sync_attendance_columns(connection, "attendance", _get_columns(inspector, "attendance"))
 

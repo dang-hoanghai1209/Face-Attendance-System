@@ -12,14 +12,26 @@ from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
 from services.auth_service import get_current_user, require_admin
+from services.class_service import VALID_CLASS_SET
 
 
 router = APIRouter(prefix="/course-sections", tags=["Course Sections"])
 VALID_SECTION_STATUSES = {"open", "closed", "archived"}
 
 
+def _validate_class(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return v
+    if v not in VALID_CLASS_SET:
+        raise ValueError(
+            f"Lớp không hợp lệ. Chỉ chấp nhận: {', '.join(sorted(VALID_CLASS_SET))}."
+        )
+    return v
+
+
 class CourseSectionCreate(BaseModel):
     section_code: str
+    class_name: Optional[str] = None
     subject_id: int
     semester: Optional[str] = None
     academic_year: Optional[str] = None
@@ -37,6 +49,11 @@ class CourseSectionCreate(BaseModel):
             raise ValueError("Vui lòng nhập mã lớp học phần.")
         return value
 
+    @field_validator("class_name")
+    @classmethod
+    def validate_class_name(cls, value):
+        return _validate_class(value)
+
     @field_validator("status")
     @classmethod
     def validate_status(cls, value):
@@ -47,6 +64,7 @@ class CourseSectionCreate(BaseModel):
 
 class CourseSectionUpdate(BaseModel):
     section_code: Optional[str] = None
+    class_name: Optional[str] = None
     subject_id: Optional[int] = None
     semester: Optional[str] = None
     academic_year: Optional[str] = None
@@ -65,6 +83,11 @@ class CourseSectionUpdate(BaseModel):
         if not value:
             raise ValueError("Vui lòng nhập mã lớp học phần.")
         return value
+
+    @field_validator("class_name")
+    @classmethod
+    def validate_class_name(cls, value):
+        return _validate_class(value)
 
     @field_validator("status")
     @classmethod
@@ -111,6 +134,7 @@ def _serialize_section(db: Session, section: CourseSection):
     return {
         "id": section.id,
         "section_code": section.section_code,
+        "class_name": section.class_name,
         "subject_id": section.subject_id,
         "subject_code": subject.subject_code if subject else None,
         "subject_name": subject.subject_name if subject else None,

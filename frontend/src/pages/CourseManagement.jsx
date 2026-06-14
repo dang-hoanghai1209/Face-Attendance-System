@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../api/axios.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
+import { VALID_CLASSES } from '../constants/classes.js'
 
 export default function CourseManagement() {
   const navigate = useNavigate()
@@ -174,7 +175,7 @@ export default function CourseManagement() {
   // 3. STATE & LOGIC CHO LỚP HỌC PHẦN & ENROLLMENTS (COURSE SECTIONS)
   // ════════════════════════════════════════════════════════════════
   const [sections, setSections] = useState([])
-  const [secForm, setSecForm] = useState({ section_code: '', subject_id: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
+  const [secForm, setSecForm] = useState({ section_code: '', subject_id: '', class_name: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
   const [secEditingId, setSecEditingId] = useState(null)
   const [secLoading, setSecLoading] = useState(false)
 
@@ -213,12 +214,13 @@ export default function CourseManagement() {
   }, [notify])
 
   const handleSaveSection = async () => {
-    if (!secForm.section_code.trim() || !secForm.subject_id) {
-      notify('Vui lòng nhập Mã lớp học phần và chọn Học phần.', 'error')
+    if (!secForm.section_code.trim() || !secForm.class_name || !secForm.subject_id) {
+      notify('Vui lòng nhập Mã học phần, chọn Lớp sinh viên và chọn Học phần.', 'error')
       return
     }
     const payload = {
       section_code: secForm.section_code.trim(),
+      class_name: secForm.class_name,
       subject_id: parseInt(secForm.subject_id, 10),
       semester: secForm.semester.trim() || null,
       academic_year: secForm.academic_year.trim() || null,
@@ -234,7 +236,7 @@ export default function CourseManagement() {
         await api.post('/course-sections/', payload)
         notify('Thêm lớp học phần thành công.')
       }
-      setSecForm({ section_code: '', subject_id: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
+      setSecForm({ section_code: '', subject_id: '', class_name: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
       setSecEditingId(null)
       fetchSections()
     } catch (e) {
@@ -249,6 +251,7 @@ export default function CourseManagement() {
     setSecForm({
       section_code: sec.section_code,
       subject_id: sec.subject_id,
+      class_name: sec.class_name || '',
       semester: sec.semester || '',
       academic_year: sec.academic_year || '',
       lecturer_name: sec.lecturer_name || '',
@@ -265,7 +268,7 @@ export default function CourseManagement() {
       notify('Đã xóa lớp học phần.')
       if (secEditingId === id) {
         setSecEditingId(null)
-        setSecForm({ section_code: '', subject_id: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
+        setSecForm({ section_code: '', subject_id: '', class_name: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
       }
       if (selectedSecId === id) setSelectedSecId(null)
       fetchSections()
@@ -743,13 +746,32 @@ export default function CourseManagement() {
               <h3 style={{ marginTop: 0, marginBottom: 12 }}>{secEditingId ? 'Sửa lớp học phần' : 'Thêm lớp học phần'}</h3>
               <div className="form-grid" style={{ marginBottom: 12 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    Mã học phần / Mã lớp học phần
+                  </label>
                   <input
-                    placeholder="Mã lớp học phần (vd: CNTT301-L01)"
+                    placeholder="Mã học phần (vd: INS-631)"
                     value={secForm.section_code}
                     onChange={(e) => setSecForm({ ...secForm, section_code: e.target.value })}
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    Lớp sinh viên
+                  </label>
+                  <select value={secForm.class_name} onChange={(e) => setSecForm({ ...secForm, class_name: e.target.value })}>
+                    <option value="">-- Chọn Lớp sinh viên --</option>
+                    {VALID_CLASSES.map((className) => (
+                      <option key={className} value={className}>
+                        {className}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    Tên học phần
+                  </label>
                   <select value={secForm.subject_id} onChange={(e) => setSecForm({ ...secForm, subject_id: e.target.value })}>
                     <option value="">-- Chọn Môn học --</option>
                     {subjects.map((sb) => (
@@ -760,6 +782,9 @@ export default function CourseManagement() {
                   </select>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    Học kỳ
+                  </label>
                   <input
                     placeholder="Học kỳ (vd: 2026-1)"
                     value={secForm.semester}
@@ -767,6 +792,9 @@ export default function CourseManagement() {
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    Năm học
+                  </label>
                   <input
                     placeholder="Năm học (vd: 2025-2026)"
                     value={secForm.academic_year}
@@ -774,6 +802,9 @@ export default function CourseManagement() {
                   />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                    Tên Giảng viên
+                  </label>
                   <input
                     placeholder="Tên Giảng viên"
                     value={secForm.lecturer_name}
@@ -790,7 +821,7 @@ export default function CourseManagement() {
                     className="secondary"
                     onClick={() => {
                       setSecEditingId(null)
-                      setSecForm({ section_code: '', subject_id: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
+                      setSecForm({ section_code: '', subject_id: '', class_name: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
                     }}
                   >
                     Hủy
@@ -803,7 +834,8 @@ export default function CourseManagement() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Mã lớp HP</th>
+                    <th>Mã HP</th>
+                    <th>Lớp</th>
                     <th>Môn học</th>
                     <th>Học kỳ / Năm học</th>
                     <th>Giảng viên</th>
@@ -815,7 +847,7 @@ export default function CourseManagement() {
                 <tbody>
                   {sections.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>
+                      <td colSpan={8} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>
                         Chưa có lớp học phần nào được tạo.
                       </td>
                     </tr>
@@ -829,6 +861,9 @@ export default function CourseManagement() {
                           <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setSelectedSecId(sec.id)}>
                             {sec.section_code}
                           </span>
+                        </td>
+                        <td>
+                          <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{sec.class_name || '-'}</span>
                         </td>
                         <td>
                           <div style={{ fontWeight: 500 }}>{sec.subject_name}</div>
@@ -874,6 +909,10 @@ export default function CourseManagement() {
                   <div className="mobile-card-header">
                     <span className="mobile-card-title">{sec.section_code}</span>
                     <span style={{ fontSize: '13px', fontWeight: '700' }}>{sec.student_count} SV</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Lớp:</span>
+                    <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{sec.class_name || '-'}</span>
                   </div>
                   <div className="mobile-card-row">
                     <span className="mobile-card-label">Môn học:</span>
@@ -1022,7 +1061,7 @@ export default function CourseManagement() {
                   <option value="">-- Chọn lớp học phần --</option>
                   {sections.map((sec) => (
                     <option key={sec.id} value={sec.id}>
-                      {sec.section_code} ({sec.subject_name})
+                      {sec.section_code} - {sec.subject_name} - Lớp {sec.class_name || '-'}
                     </option>
                   ))}
                 </select>

@@ -1,4 +1,4 @@
-﻿import os
+import os
 import unittest
 from datetime import date, datetime, time
 
@@ -103,6 +103,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         section = CourseSection(
             section_code="MVP101-64CNTT-2026",
+            class_name="64CNTT",
             subject_id=subject.id,
             status="open",
         )
@@ -112,7 +113,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         session = ClassSession(
             subject=subject.subject_name,
-            class_name=section.section_code,
+            class_name=section.class_name,
             section_id=section.id,
             classroom_id=classroom.id,
             latitude=classroom.gps_lat,

@@ -11,6 +11,7 @@ class CourseSection(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     section_code = Column(String(80), nullable=False, unique=True, index=True)
+    class_name = Column(String(50), nullable=True)
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False, index=True)
     semester = Column(String(30))
     academic_year = Column(String(30))

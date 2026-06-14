@@ -131,6 +131,9 @@ def create_session_from_section(
     if not section:
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học phần.")
 
+    if not section.class_name:
+        raise HTTPException(status_code=400, detail="Lớp học phần chưa chọn mã lớp sinh viên.")
+
     classroom = db.query(Classroom).filter(Classroom.id == session_data.classroom_id).first()
     if not classroom:
         raise HTTPException(status_code=404, detail="Không tìm thấy phòng học.")
@@ -155,7 +158,7 @@ def create_session_from_section(
 
         new_session = ClassSession(
             subject=subject.subject_name if subject else section.section_code,
-            class_name=section.section_code,
+            class_name=section.class_name,
             section_id=section.id,
             classroom_id=classroom.id,
             latitude=classroom.gps_lat,

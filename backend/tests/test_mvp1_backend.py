@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 import unittest
 from datetime import date, datetime, time
@@ -101,6 +101,7 @@ class BackendMVP1Tests(unittest.TestCase):
         section = create_course_section(
             CourseSectionCreate(
                 section_code="MVP101-64CNTT-2026",
+                class_name="64CNTT",
                 subject_id=subject.id,
                 semester="2026-1",
                 academic_year="2025-2026",

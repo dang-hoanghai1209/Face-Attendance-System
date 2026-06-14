@@ -103,6 +103,47 @@ class CourseSectionClassNameTests(unittest.TestCase):
         self.assertNotEqual(session.class_name, "INS-631")  # Verify section_code is not converted to class_name
         self.assertEqual(session.section_id, section["id"])
 
+    def test_create_session_from_section_skips_week_9_holiday(self):
+        section = create_course_section(
+            CourseSectionCreate(
+                section_code="INS-631",
+                class_name="64CNTT",
+                subject_id=self.subject.id,
+                semester="2026-1",
+                academic_year="2025-2026",
+                lecturer_name="Giảng viên A",
+                status="open",
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        create_session_from_section(
+            SessionFromSectionCreate(
+                section_id=section["id"],
+                classroom_id=self.classroom.id,
+                session_date=date(2026, 6, 15),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+                weeks=15,
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        sessions = (
+            self.db.query(ClassSession)
+            .filter(ClassSession.section_id == section["id"])
+            .order_by(ClassSession.session_date.asc())
+            .all()
+        )
+
+        self.assertEqual(len(sessions), 14)
+        self.assertEqual(sessions[0].session_date, date(2026, 6, 15))
+        self.assertEqual(sessions[7].session_date, date(2026, 8, 3))
+        self.assertEqual(sessions[8].session_date, date(2026, 8, 17))
+        self.assertEqual(sessions[13].session_date, date(2026, 9, 21))
+
     def test_create_session_from_section_with_missing_class_name_raises_400(self):
         # Create course section without class_name
         section = create_course_section(

@@ -146,9 +146,29 @@ def create_session_from_section(
     weeks_to_create = session_data.weeks or 1
     created_sessions = []
 
+    # Find earliest session to determine semester start date
+    earliest_session = (
+        db.query(ClassSession)
+        .filter(ClassSession.section_id == section.id)
+        .order_by(ClassSession.session_date.asc())
+        .first()
+    )
+    if earliest_session:
+        semester_start_date = earliest_session.session_date
+    else:
+        semester_start_date = session_data.session_date
+
+    diff_days = (session_data.session_date - semester_start_date).days
+    batch_start_week = diff_days // 7
+
+    session_count_created = 0
     for i in range(weeks_to_create):
+        nominal_week_index = batch_start_week + i
+        if nominal_week_index == 8:
+            continue
+
         current_date = session_data.session_date + timedelta(weeks=i)
-        current_number = existing_count + i + 1
+        current_number = existing_count + session_count_created + 1
 
         note_suffix = f"[Buổi {current_number}]"
         if session_data.note:
@@ -174,6 +194,10 @@ def create_session_from_section(
         )
         db.add(new_session)
         created_sessions.append(new_session)
+        session_count_created += 1
+
+    if not created_sessions:
+        raise HTTPException(status_code=400, detail="Không thể tạo buổi học vì các tuần đăng ký trùng với tuần nghỉ.")
 
     db.commit()
     for s in created_sessions:

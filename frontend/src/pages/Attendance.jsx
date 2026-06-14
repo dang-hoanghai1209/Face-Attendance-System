@@ -111,6 +111,10 @@ export default function Attendance() {
   const [timeStatus,         setTimeStatus]         = useState('not_started')
   const [classrooms,         setClassrooms]         = useState([])
 
+  // Section grouping states
+  const [selectedSectionKey, setSelectedSectionKey] = useState('')
+  const [activeMobileGroup,  setActiveMobileGroup]  = useState(null)
+
   const selectedSession = useMemo(
     () => sessions.find((session) => String(session.id || session.session_id) === String(sessionId)),
     [sessions, sessionId],
@@ -209,14 +213,158 @@ export default function Attendance() {
     }
   }
 
+  // ── Helpers for Session Status & Grouping ─────────────────────── //
+  const getSessionStatus = (session) => {
+    if (!session.session_date || !session.start_time || !session.end_time) {
+      return { label: 'Không rõ', badgeClass: 'badge' }
+    }
+    const now = new Date()
+    const [year, month, day] = session.session_date.split('-').map(Number)
+    const parseTime = (timeStr) => {
+      const parts = timeStr.split(':').map(Number)
+      return { h: parts[0] || 0, m: parts[1] || 0 }
+    }
+    const startParts = parseTime(session.start_time)
+    const endParts = parseTime(session.end_time)
+    const start = new Date(year, month - 1, day, startParts.h, startParts.m, 0)
+    const end = new Date(year, month - 1, day, endParts.h, endParts.m, 0)
+
+    if (now < start) {
+      return { label: 'Sắp diễn ra', badgeClass: 'badge info' }
+    } else if (now > end) {
+      return { label: 'Đã kết thúc', badgeClass: 'badge muted' }
+    } else {
+      return { label: 'Đang diễn ra', badgeClass: 'badge success' }
+    }
+  }
+
+  const getSessionGroupKey = (s) => {
+    if (s.section_id) return `section_${s.section_id}`;
+    const secCode = s.section_code || '';
+    const secGrp = s.section_group || '';
+    const clsName = s.class_name || '';
+    const subName = s.subject || s.subject_name || '';
+    return `fallback_${secCode}_${secGrp}_${clsName}_${subName}`;
+  };
+
+  const groupSessionsForAttendance = (sessionsList) => {
+    const groups = {};
+    sessionsList.forEach((s) => {
+      const key = getSessionGroupKey(s);
+      if (!groups[key]) {
+        groups[key] = {
+          key,
+          section_id: s.section_id || null,
+          section_code: s.section_code || s.subject_code || '',
+          subject: s.subject || s.subject_name || '',
+          section_group: s.section_group || '',
+          class_name: s.class_name || '',
+          sessions: []
+        };
+      }
+      groups[key].sessions.push(s);
+    });
+    return Object.values(groups);
+  };
+
+  const findAutoSelectSession = (sessionsList) => {
+    if (sessionsList.length === 0) return null;
+
+    const getSessionDateTime = (s) => {
+      if (!s.session_date || !s.start_time) return new Date(0);
+      const [year, month, day] = s.session_date.split('-').map(Number);
+      const [h, m] = s.start_time.split(':').map(Number);
+      return new Date(year, month - 1, day, h, m, 0);
+    };
+
+    const getSessionEndDateTime = (s) => {
+      if (!s.session_date || !s.end_time) return new Date(0);
+      const [year, month, day] = s.session_date.split('-').map(Number);
+      const [h, m] = s.end_time.split(':').map(Number);
+      return new Date(year, month - 1, day, h, m, 0);
+    };
+
+    const now = new Date();
+
+    // 1. Look for ongoing session
+    const ongoing = sessionsList.find(s => {
+      const start = getSessionDateTime(s);
+      const end = getSessionEndDateTime(s);
+      return now >= start && now <= end;
+    });
+    if (ongoing) return ongoing;
+
+    // 2. Look for closest upcoming session
+    const upcomingSessions = sessionsList.filter(s => {
+      const start = getSessionDateTime(s);
+      return now < start;
+    });
+
+    if (upcomingSessions.length > 0) {
+      upcomingSessions.sort((a, b) => {
+        return getSessionDateTime(a) - getSessionDateTime(b);
+      });
+      return upcomingSessions[0];
+    }
+
+    // 3. Fallback to most recent session
+    const sorted = [...sessionsList].sort((a, b) => {
+      return getSessionDateTime(b) - getSessionDateTime(a);
+    });
+    return sorted[0];
+  };
+
+  const groupedSections = useMemo(() => {
+    const grouped = groupSessionsForAttendance(sessions);
+    grouped.forEach(g => {
+      g.sessions.sort((a, b) => {
+        const dateA = new Date(`${a.session_date}T${a.start_time || '00:00:00'}`);
+        const dateB = new Date(`${b.session_date}T${b.start_time || '00:00:00'}`);
+        return dateA - dateB;
+      });
+    });
+    return grouped;
+  }, [sessions]);
+
+  const handleSectionChange = (sectionKey) => {
+    setSelectedSectionKey(sectionKey);
+    const group = groupedSections.find(g => g.key === sectionKey);
+    if (group && group.sessions.length > 0) {
+      const bestSession = findAutoSelectSession(group.sessions);
+      setSessionId(bestSession ? String(bestSession.id || bestSession.session_id) : '');
+    } else {
+      setSessionId('');
+    }
+  };
+
+  const getGroupMetrics = (group) => {
+    let ongoing = 0;
+    let upcoming = 0;
+    let finished = 0;
+    group.sessions.forEach((s) => {
+      const status = getSessionStatus(s);
+      if (status.label === 'Đang diễn ra') ongoing++;
+      else if (status.label === 'Sắp diễn ra') upcoming++;
+      else if (status.label === 'Đã kết thúc') finished++;
+    });
+    return { ongoing, upcoming, finished, total: group.sessions.length };
+  };
+
   // ── Load dữ liệu ban đầu ──────────────────────────────────────── //
   const loadBaseData = async () => {
     try {
       const data = await fetchSessionsForUser(user)
       setSessions(data)
-      if (!sessionId && data.length > 0) {
-        const firstSession = data[0]
-        setSessionId(String(firstSession.id || firstSession.session_id))
+      if (data.length > 0) {
+        const bestSession = findAutoSelectSession(data)
+        if (bestSession) {
+          const sId = String(bestSession.id || bestSession.session_id)
+          setSessionId(sId)
+          setSelectedSectionKey(getSessionGroupKey(bestSession))
+        }
+      } else {
+        setSessionId('')
+        setSelectedSectionKey('')
       }
     } catch (err) {
       setMessage(getApiErrorMessage(err, 'Không tải được dữ liệu điểm danh.'))
@@ -241,8 +389,12 @@ export default function Attendance() {
         if (!mounted) return
         setSessions(data)
         if (data.length > 0) {
-          const firstSession = data[0]
-          setSessionId((cur) => cur || String(firstSession.id || firstSession.session_id))
+          const bestSession = findAutoSelectSession(data)
+          if (bestSession) {
+            const sId = String(bestSession.id || bestSession.session_id)
+            setSessionId(sId)
+            setSelectedSectionKey(getSessionGroupKey(bestSession))
+          }
         }
       } catch (err) {
         if (mounted) setMessage(getApiErrorMessage(err, 'Không tải được dữ liệu điểm danh.'))
@@ -806,40 +958,144 @@ export default function Attendance() {
           <div style={{ animation: 'fadeUp 0.35s ease both' }}>
             <div className="page-header" style={{ marginBottom: 12 }}>
               <p className="eyebrow">Bước 1 / 4</p>
-              <h2 className="page-title" style={{ fontSize: '20px' }}>Chọn buổi học</h2>
-              <p className="page-subtitle">Chọn một buổi học diễn ra để tiến hành điểm danh.</p>
+              <h2 className="page-title" style={{ fontSize: '20px' }}>Chọn lớp học phần</h2>
+              <p className="page-subtitle">Chọn một lớp học phần để tiến hành điểm danh.</p>
             </div>
             
-            {sessions.length === 0 ? (
-              <div className="empty-state">Chưa có buổi học nào được lên lịch hôm nay.</div>
+            {groupedSections.length === 0 ? (
+              <div className="empty-state">Chưa có lớp học phần nào được lên lịch hôm nay.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {sessions.map((s) => (
-                  <div
-                    key={s.id || s.session_id}
-                    className="mobile-card"
-                    style={{ cursor: 'pointer', border: sessionId === String(s.id || s.session_id) ? '1px solid var(--teal)' : '1px solid var(--bdr)' }}
-                    onClick={() => {
-                      setSessionId(String(s.id || s.session_id))
-                      setMobileStep(2)
-                      setResult(null)
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 800, color: 'var(--white)' }}>{s.subject || s.subject_name}</span>
-                      <span className="badge success" style={{ fontSize: '10px' }}>#{s.id || s.session_id}</span>
+                {groupedSections.map((group) => {
+                  const metrics = getGroupMetrics(group);
+                  return (
+                    <div
+                      key={group.key}
+                      className="mobile-card"
+                      style={{
+                        cursor: 'pointer',
+                        border: selectedSectionKey === group.key ? '1px solid var(--teal)' : '1px solid var(--bdr)'
+                      }}
+                      onClick={() => {
+                        setSelectedSectionKey(group.key);
+                        setActiveMobileGroup(group);
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 800, color: 'var(--white)' }}>
+                          {group.section_code ? `[${group.section_code}] ` : ''}{group.subject}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--white2)' }}>
+                        Nhóm: <span style={{ color: 'var(--teal)', fontWeight: 600 }}>{group.section_group || '-'}</span>
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--white2)' }}>
+                        Lớp: <span style={{ fontFamily: 'var(--mono)' }}>{group.class_name || '-'}</span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
+                        Số buổi: {metrics.total} (🟢 {metrics.ongoing} · 🔵 {metrics.upcoming} · ⚪ {metrics.finished})
+                      </div>
                     </div>
-                    <div style={{ fontSize: '13px', color: 'var(--white2)' }}>
-                      Lớp: <span style={{ fontFamily: 'var(--mono)' }}>{s.class_name || s.section_code}</span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>📅 {formatDateStr(s.session_date)}</span>
-                      <span>⏰ {s.start_time?.slice(0, 5)} - {s.end_time?.slice(0, 5)}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
+
+            {/* Session selector Modal */}
+            {activeMobileGroup && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  background: 'rgba(0,0,0,.65)',
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  zIndex: 1000,
+                  animation: 'fadeIn 0.2s ease'
+                }}
+                onClick={() => setActiveMobileGroup(null)}
+              >
+                <div
+                  style={{
+                    width: '100%',
+                    maxHeight: '75vh',
+                    background: 'var(--navy2)',
+                    borderTop: '1px solid var(--bdr2)',
+                    borderTopLeftRadius: 16,
+                    borderTopRightRadius: 16,
+                    padding: '20px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 16,
+                    animation: 'slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--bdr)', paddingBottom: 10 }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 16, color: 'var(--white)' }}>Chọn buổi học</h3>
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
+                        {activeMobileGroup.subject} {activeMobileGroup.section_group ? `(Nhóm ${activeMobileGroup.section_group})` : ''}
+                      </p>
+                    </div>
+                    <button
+                      className="secondary"
+                      onClick={() => setActiveMobileGroup(null)}
+                      style={{ minHeight: 32, padding: '0 8px', fontSize: 18 }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 20 }}>
+                    {activeMobileGroup.sessions.map((s) => {
+                      const status = getSessionStatus(s);
+                      return (
+                        <div
+                          key={s.id || s.session_id}
+                          className="mobile-card"
+                          style={{
+                            cursor: 'pointer',
+                            border: sessionId === String(s.id || s.session_id) ? '1px solid var(--teal)' : '1px solid var(--bdr)',
+                            padding: 12
+                          }}
+                          onClick={() => {
+                            setSessionId(String(s.id || s.session_id));
+                            setActiveMobileGroup(null);
+                            setMobileStep(2);
+                            setResult(null);
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--white)' }}>
+                              Buổi {s.session_number || `#${s.id}`}
+                            </span>
+                            <span className={status.badgeClass} style={{ fontSize: 10 }}>
+                              {status.label}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--white2)', marginTop: 4 }}>
+                            📅 {formatDateStr(s.session_date)}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                            ⏰ {s.start_time?.slice(0, 5)} - {s.end_time?.slice(0, 5)} {s.room_name ? ` · 📍 ${s.room_name}` : ''}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            <style>{`
+              @keyframes slideUp {
+                from { transform: translateY(100%); }
+                to { transform: translateY(0); }
+              }
+            `}</style>
           </div>
         )
       
@@ -1098,20 +1354,44 @@ export default function Attendance() {
               <span className="badge success">Điểm danh chính thức</span>
             </div>
             <div className="panel panel-pad" style={{ marginBottom: 16 }}>
-              <div className="form-grid">
+              <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
                 {sessions.length === 0 ? (
-                  <p style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: 13, gridColumn: '1 / -1' }}>
                     Chưa có buổi học. Vui lòng tạo buổi học tại mục <strong>Buổi học</strong> trước.
                   </p>
                 ) : (
-                  <select value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
-                    <option value="">Chọn buổi học</option>
-                    {sessions.map((s) => (
-                      <option key={s.id || s.session_id} value={s.id || s.session_id}>
-                        #{s.id || s.session_id} — {s.class_name || s.section_code} — {s.subject || s.subject_name} — {formatDateStr(s.session_date)}
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <select
+                      value={selectedSectionKey}
+                      onChange={(e) => handleSectionChange(e.target.value)}
+                    >
+                      <option value="">-- Chọn lớp học phần --</option>
+                      {groupedSections.map((group) => (
+                        <option key={group.key} value={group.key}>
+                          {group.section_code ? `[${group.section_code}] ` : ''}
+                          {group.subject} 
+                          {group.section_group ? ` - Nhóm ${group.section_group}` : ''}
+                          {group.class_name ? ` - Lớp ${group.class_name}` : ''}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={sessionId}
+                      onChange={(e) => setSessionId(e.target.value)}
+                      disabled={!selectedSectionKey}
+                    >
+                      <option value="">-- Chọn buổi học --</option>
+                      {selectedSectionKey && groupedSections.find(g => g.key === selectedSectionKey)?.sessions.map((s) => {
+                        const status = getSessionStatus(s);
+                        return (
+                          <option key={s.id || s.session_id} value={s.id || s.session_id}>
+                            Buổi {s.session_number || `#${s.id}`} — {formatDateStr(s.session_date)} — {status.label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </>
                 )}
 
                 <select value={action} onChange={(e) => setAction(e.target.value)}>
@@ -1120,10 +1400,12 @@ export default function Attendance() {
                   ))}
                 </select>
 
-                <button onClick={loadBaseData}>Tải lại dữ liệu</button>
-                <button onClick={() => loadSessionAttendance(sessionId)} disabled={!sessionId}>
-                  Tải lại bảng điểm danh
-                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={loadBaseData} style={{ flex: 1 }}>Tải lại dữ liệu</button>
+                  <button onClick={() => loadSessionAttendance(sessionId)} disabled={!sessionId} style={{ flex: 1 }}>
+                    Tải lại bảng điểm danh
+                  </button>
+                </div>
               </div>
             </div>
 

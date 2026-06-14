@@ -214,20 +214,36 @@ export default function Attendance() {
   }
 
   // ── Helpers for Session Status & Grouping ─────────────────────── //
+  const getSessionDateValue = (session) => session.session_date || session.date || ''
+  const getSessionSubjectValue = (session) => session.subject_name || session.subject || ''
+  const getSessionIdValue = (session) => session.id || session.session_id
+
+  const formatDateForDisplay = (dateStr) => {
+    if (!dateStr) return ''
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
+    const parts = String(dateStr).split('-')
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`
+    }
+    return dateStr
+  }
+
+  const getSessionDateTime = (session, timeField = 'start_time') => {
+    const sessionDate = getSessionDateValue(session)
+    const timeValue = session[timeField]
+    if (!sessionDate || !timeValue) return null
+    const [year, month, day] = sessionDate.split('-').map(Number)
+    const [hour, minute] = String(timeValue).split(':').map(Number)
+    return new Date(year, month - 1, day, hour || 0, minute || 0, 0)
+  }
+
   const getSessionStatus = (session) => {
-    if (!session.session_date || !session.start_time || !session.end_time) {
+    const start = getSessionDateTime(session, 'start_time')
+    const end = getSessionDateTime(session, 'end_time')
+    if (!start || !end) {
       return { label: 'Không rõ', badgeClass: 'badge' }
     }
     const now = new Date()
-    const [year, month, day] = session.session_date.split('-').map(Number)
-    const parseTime = (timeStr) => {
-      const parts = timeStr.split(':').map(Number)
-      return { h: parts[0] || 0, m: parts[1] || 0 }
-    }
-    const startParts = parseTime(session.start_time)
-    const endParts = parseTime(session.end_time)
-    const start = new Date(year, month - 1, day, startParts.h, startParts.m, 0)
-    const end = new Date(year, month - 1, day, endParts.h, endParts.m, 0)
 
     if (now < start) {
       return { label: 'Sắp diễn ra', badgeClass: 'badge info' }
@@ -239,99 +255,107 @@ export default function Attendance() {
   }
 
   const getSessionGroupKey = (s) => {
-    if (s.section_id) return `section_${s.section_id}`;
-    const secCode = s.section_code || '';
-    const secGrp = s.section_group || '';
-    const clsName = s.class_name || '';
-    const subName = s.subject || s.subject_name || '';
-    return `fallback_${secCode}_${secGrp}_${clsName}_${subName}`;
-  };
+    if (s.section_id !== null && s.section_id !== undefined) return `section:${s.section_id}`
+    return [
+      s.section_code || '',
+      s.section_group || '',
+      s.class_name || '',
+      getSessionSubjectValue(s),
+    ].join('|')
+  }
 
-  const groupSessionsForAttendance = (sessionsList) => {
-    const groups = {};
+  const formatSectionLabel = (group) => [
+    group.section_code,
+    group.subject_name,
+    group.section_group ? `Nhóm ${group.section_group}` : '',
+    group.class_name ? `Lớp ${group.class_name}` : '',
+  ].filter(Boolean).join(' - ')
+
+  const formatSessionOptionLabel = (session) => {
+    const status = getSessionStatus(session)
+    return `Buổi ${session.session_number || `#${getSessionIdValue(session)}`} - ${formatDateForDisplay(getSessionDateValue(session))} - ${status.label}`
+  }
+
+  const sortSessionsForPicker = (sessionsList) => [...sessionsList].sort((a, b) => {
+    const statusPriority = { 'Đang diễn ra': 0, 'Sắp diễn ra': 1, 'Đã kết thúc': 2, 'Không rõ': 3 }
+    const statusA = getSessionStatus(a).label
+    const statusB = getSessionStatus(b).label
+    const priorityDiff = (statusPriority[statusA] ?? 3) - (statusPriority[statusB] ?? 3)
+    if (priorityDiff !== 0) return priorityDiff
+
+    const timeA = getSessionDateTime(a, 'start_time')?.getTime() ?? 0
+    const timeB = getSessionDateTime(b, 'start_time')?.getTime() ?? 0
+    if (statusA === 'Đã kết thúc') return timeB - timeA
+    return timeA - timeB
+  })
+
+  const groupSessionsBySection = (sessionsList) => {
+    const groups = new Map()
     sessionsList.forEach((s) => {
-      const key = getSessionGroupKey(s);
-      if (!groups[key]) {
-        groups[key] = {
+      const key = getSessionGroupKey(s)
+      if (!groups.has(key)) {
+        groups.set(key, {
           key,
-          section_id: s.section_id || null,
+          section_id: s.section_id ?? null,
           section_code: s.section_code || s.subject_code || '',
-          subject: s.subject || s.subject_name || '',
+          subject_name: getSessionSubjectValue(s),
           section_group: s.section_group || '',
           class_name: s.class_name || '',
-          sessions: []
-        };
+          sessions: [],
+        })
       }
-      groups[key].sessions.push(s);
-    });
-    return Object.values(groups);
-  };
+      groups.get(key).sessions.push(s)
+    })
 
-  const findAutoSelectSession = (sessionsList) => {
-    if (sessionsList.length === 0) return null;
+    return Array.from(groups.values())
+      .map((group) => ({ ...group, sessions: sortSessionsForPicker(group.sessions) }))
+      .sort((a, b) => formatSectionLabel(a).localeCompare(formatSectionLabel(b), 'vi'))
+  }
 
-    const getSessionDateTime = (s) => {
-      if (!s.session_date || !s.start_time) return new Date(0);
-      const [year, month, day] = s.session_date.split('-').map(Number);
-      const [h, m] = s.start_time.split(':').map(Number);
-      return new Date(year, month - 1, day, h, m, 0);
-    };
+  const pickBestSessionInGroup = (groupSessions) => sortSessionsForPicker(groupSessions)[0] || null
 
-    const getSessionEndDateTime = (s) => {
-      if (!s.session_date || !s.end_time) return new Date(0);
-      const [year, month, day] = s.session_date.split('-').map(Number);
-      const [h, m] = s.end_time.split(':').map(Number);
-      return new Date(year, month - 1, day, h, m, 0);
-    };
+  const pickBestInitialGroup = (groups) => {
+    const candidates = groups
+      .map((group) => ({ group, session: pickBestSessionInGroup(group.sessions) }))
+      .filter((item) => item.session)
 
-    const now = new Date();
+    const ongoing = candidates.find((item) => getSessionStatus(item.session).label === 'Đang diễn ra')
+    if (ongoing) return ongoing
 
-    // 1. Look for ongoing session
-    const ongoing = sessionsList.find(s => {
-      const start = getSessionDateTime(s);
-      const end = getSessionEndDateTime(s);
-      return now >= start && now <= end;
-    });
-    if (ongoing) return ongoing;
+    const upcoming = candidates
+      .filter((item) => getSessionStatus(item.session).label === 'Sắp diễn ra')
+      .sort((a, b) => {
+        const timeA = getSessionDateTime(a.session, 'start_time')?.getTime() ?? Number.MAX_SAFE_INTEGER
+        const timeB = getSessionDateTime(b.session, 'start_time')?.getTime() ?? Number.MAX_SAFE_INTEGER
+        return timeA - timeB
+      })[0]
+    if (upcoming) return upcoming
 
-    // 2. Look for closest upcoming session
-    const upcomingSessions = sessionsList.filter(s => {
-      const start = getSessionDateTime(s);
-      return now < start;
-    });
-
-    if (upcomingSessions.length > 0) {
-      upcomingSessions.sort((a, b) => {
-        return getSessionDateTime(a) - getSessionDateTime(b);
-      });
-      return upcomingSessions[0];
-    }
-
-    // 3. Fallback to most recent session
-    const sorted = [...sessionsList].sort((a, b) => {
-      return getSessionDateTime(b) - getSessionDateTime(a);
-    });
-    return sorted[0];
-  };
+    return candidates
+      .sort((a, b) => {
+        const timeA = getSessionDateTime(a.session, 'start_time')?.getTime() ?? 0
+        const timeB = getSessionDateTime(b.session, 'start_time')?.getTime() ?? 0
+        return timeB - timeA
+      })[0] || null
+  }
 
   const groupedSections = useMemo(() => {
-    const grouped = groupSessionsForAttendance(sessions);
-    grouped.forEach(g => {
-      g.sessions.sort((a, b) => {
-        const dateA = new Date(`${a.session_date}T${a.start_time || '00:00:00'}`);
-        const dateB = new Date(`${b.session_date}T${b.start_time || '00:00:00'}`);
-        return dateA - dateB;
-      });
-    });
-    return grouped;
+    return groupSessionsBySection(sessions);
   }, [sessions]);
+
+  const selectedSection = useMemo(
+    () => groupedSections.find(g => g.key === selectedSectionKey) || null,
+    [groupedSections, selectedSectionKey],
+  )
+
+  const selectedSectionSessions = selectedSection?.sessions || []
 
   const handleSectionChange = (sectionKey) => {
     setSelectedSectionKey(sectionKey);
     const group = groupedSections.find(g => g.key === sectionKey);
     if (group && group.sessions.length > 0) {
-      const bestSession = findAutoSelectSession(group.sessions);
-      setSessionId(bestSession ? String(bestSession.id || bestSession.session_id) : '');
+      const bestSession = pickBestSessionInGroup(group.sessions);
+      setSessionId(bestSession ? String(getSessionIdValue(bestSession)) : '');
     } else {
       setSessionId('');
     }
@@ -356,11 +380,11 @@ export default function Attendance() {
       const data = await fetchSessionsForUser(user)
       setSessions(data)
       if (data.length > 0) {
-        const bestSession = findAutoSelectSession(data)
-        if (bestSession) {
-          const sId = String(bestSession.id || bestSession.session_id)
+        const best = pickBestInitialGroup(groupSessionsBySection(data))
+        if (best) {
+          const sId = String(getSessionIdValue(best.session))
           setSessionId(sId)
-          setSelectedSectionKey(getSessionGroupKey(bestSession))
+          setSelectedSectionKey(best.group.key)
         }
       } else {
         setSessionId('')
@@ -389,11 +413,11 @@ export default function Attendance() {
         if (!mounted) return
         setSessions(data)
         if (data.length > 0) {
-          const bestSession = findAutoSelectSession(data)
-          if (bestSession) {
-            const sId = String(bestSession.id || bestSession.session_id)
+          const best = pickBestInitialGroup(groupSessionsBySection(data))
+          if (best) {
+            const sId = String(getSessionIdValue(best.session))
             setSessionId(sId)
-            setSelectedSectionKey(getSessionGroupKey(bestSession))
+            setSelectedSectionKey(best.group.key)
           }
         }
       } catch (err) {
@@ -968,6 +992,7 @@ export default function Attendance() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {groupedSections.map((group) => {
                   const metrics = getGroupMetrics(group);
+                  const bestSession = pickBestSessionInGroup(group.sessions);
                   return (
                     <div
                       key={group.key}
@@ -983,17 +1008,30 @@ export default function Attendance() {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontWeight: 800, color: 'var(--white)' }}>
-                          {group.section_code ? `[${group.section_code}] ` : ''}{group.subject}
+                          {formatSectionLabel(group)}
                         </span>
                       </div>
-                      <div style={{ fontSize: '13px', color: 'var(--white2)' }}>
-                        Nhóm: <span style={{ color: 'var(--teal)', fontWeight: 600 }}>{group.section_group || '-'}</span>
+                      <div className="mobile-card-row">
+                        <span className="mobile-card-label">Mã học phần:</span>
+                        <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>{group.section_code || '-'}</span>
                       </div>
-                      <div style={{ fontSize: '13px', color: 'var(--white2)' }}>
-                        Lớp: <span style={{ fontFamily: 'var(--mono)' }}>{group.class_name || '-'}</span>
+                      <div className="mobile-card-row">
+                        <span className="mobile-card-label">Tên học phần:</span>
+                        <span className="mobile-card-value">{group.subject_name || '-'}</span>
+                      </div>
+                      <div className="mobile-card-row">
+                        <span className="mobile-card-label">Nhóm:</span>
+                        <span className="mobile-card-value" style={{ color: 'var(--teal)' }}>{group.section_group || '-'}</span>
+                      </div>
+                      <div className="mobile-card-row">
+                        <span className="mobile-card-label">Lớp:</span>
+                        <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>{group.class_name || '-'}</span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--white2)', marginTop: '4px' }}>
+                        Buổi ưu tiên: {bestSession ? `${formatSessionOptionLabel(bestSession)}` : '-'}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-                        Số buổi: {metrics.total} (🟢 {metrics.ongoing} · 🔵 {metrics.upcoming} · ⚪ {metrics.finished})
+                        Tổng số buổi: {metrics.total} ({metrics.ongoing} đang, {metrics.upcoming} sắp, {metrics.finished} xong)
                       </div>
                     </div>
                   );
@@ -1037,7 +1075,7 @@ export default function Attendance() {
                     <div>
                       <h3 style={{ margin: 0, fontSize: 16, color: 'var(--white)' }}>Chọn buổi học</h3>
                       <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-                        {activeMobileGroup.subject} {activeMobileGroup.section_group ? `(Nhóm ${activeMobileGroup.section_group})` : ''}
+                        {formatSectionLabel(activeMobileGroup)}
                       </p>
                     </div>
                     <button
@@ -1054,15 +1092,15 @@ export default function Attendance() {
                       const status = getSessionStatus(s);
                       return (
                         <div
-                          key={s.id || s.session_id}
+                          key={getSessionIdValue(s)}
                           className="mobile-card"
                           style={{
                             cursor: 'pointer',
-                            border: sessionId === String(s.id || s.session_id) ? '1px solid var(--teal)' : '1px solid var(--bdr)',
+                            border: sessionId === String(getSessionIdValue(s)) ? '1px solid var(--teal)' : '1px solid var(--bdr)',
                             padding: 12
                           }}
                           onClick={() => {
-                            setSessionId(String(s.id || s.session_id));
+                            setSessionId(String(getSessionIdValue(s)));
                             setActiveMobileGroup(null);
                             setMobileStep(2);
                             setResult(null);
@@ -1070,17 +1108,17 @@ export default function Attendance() {
                         >
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 700, color: 'var(--white)' }}>
-                              Buổi {s.session_number || `#${s.id}`}
+                              Buổi {s.session_number || `#${getSessionIdValue(s)}`}
                             </span>
                             <span className={status.badgeClass} style={{ fontSize: 10 }}>
                               {status.label}
                             </span>
                           </div>
                           <div style={{ fontSize: '12px', color: 'var(--white2)', marginTop: 4 }}>
-                            📅 {formatDateStr(s.session_date)}
+                            {formatDateForDisplay(getSessionDateValue(s))}
                           </div>
                           <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                            ⏰ {s.start_time?.slice(0, 5)} - {s.end_time?.slice(0, 5)} {s.room_name ? ` · 📍 ${s.room_name}` : ''}
+                            {s.start_time?.slice(0, 5)} - {s.end_time?.slice(0, 5)} {s.room_name ? ` - ${s.room_name}` : ''}
                           </div>
                         </div>
                       );
@@ -1110,15 +1148,20 @@ export default function Attendance() {
 
             {selectedSession && (
               <div className="mobile-card" style={{ marginBottom: '14px', background: 'rgba(0, 201, 167, 0.03)' }}>
-                <div style={{ fontWeight: 800, color: 'var(--white)' }}>{selectedSession.subject || selectedSession.subject_name}</div>
+                <div style={{ fontWeight: 800, color: 'var(--white)' }}>{getSessionSubjectValue(selectedSession)}</div>
                 <div style={{ fontSize: '13px', color: 'var(--muted)' }}>
-                  Lớp học phần: {selectedSession.class_name || selectedSession.section_code}
+                  Lớp học phần: {formatSectionLabel({
+                    section_code: selectedSession.section_code || selectedSession.subject_code || '',
+                    subject_name: getSessionSubjectValue(selectedSession),
+                    section_group: selectedSession.section_group || '',
+                    class_name: selectedSession.class_name || '',
+                  })}
                 </div>
               </div>
             )}
 
             <AttendanceCountdown
-              sessionDate={selectedSession?.session_date}
+              sessionDate={selectedSession ? getSessionDateValue(selectedSession) : undefined}
               startTime={selectedSession?.start_time}
               onStatusChange={setTimeStatus}
             />
@@ -1368,10 +1411,7 @@ export default function Attendance() {
                       <option value="">-- Chọn lớp học phần --</option>
                       {groupedSections.map((group) => (
                         <option key={group.key} value={group.key}>
-                          {group.section_code ? `[${group.section_code}] ` : ''}
-                          {group.subject} 
-                          {group.section_group ? ` - Nhóm ${group.section_group}` : ''}
-                          {group.class_name ? ` - Lớp ${group.class_name}` : ''}
+                          {formatSectionLabel(group)}
                         </option>
                       ))}
                     </select>
@@ -1382,14 +1422,11 @@ export default function Attendance() {
                       disabled={!selectedSectionKey}
                     >
                       <option value="">-- Chọn buổi học --</option>
-                      {selectedSectionKey && groupedSections.find(g => g.key === selectedSectionKey)?.sessions.map((s) => {
-                        const status = getSessionStatus(s);
-                        return (
-                          <option key={s.id || s.session_id} value={s.id || s.session_id}>
-                            Buổi {s.session_number || `#${s.id}`} — {formatDateStr(s.session_date)} — {status.label}
-                          </option>
-                        );
-                      })}
+                      {selectedSectionSessions.map((s) => (
+                        <option key={getSessionIdValue(s)} value={getSessionIdValue(s)}>
+                          {formatSessionOptionLabel(s)}
+                        </option>
+                      ))}
                     </select>
                   </>
                 )}
@@ -1463,7 +1500,7 @@ export default function Attendance() {
               {selectedSession && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <AttendanceCountdown
-                    sessionDate={selectedSession.session_date}
+                    sessionDate={getSessionDateValue(selectedSession)}
                     startTime={selectedSession.start_time}
                   />
                   <GPSStatus

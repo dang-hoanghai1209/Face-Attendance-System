@@ -81,6 +81,33 @@ def _serialize_section(db: Session, section: CourseSection):
         .filter(Enrollment.course_section_id == section.id, Enrollment.status == "active")
         .count()
     )
+
+    # Calculate weekly representation relative to earliest session
+    sessions = (
+        db.query(ClassSession)
+        .filter(ClassSession.section_id == section.id)
+        .order_by(ClassSession.session_date.asc())
+        .all()
+    )
+
+    weeks_str = ""
+    if sessions:
+        min_date = sessions[0].session_date
+        week_numbers = []
+        for s in sessions:
+            diff_days = (s.session_date - min_date).days
+            week_num = (diff_days // 7) + 1
+            week_numbers.append(week_num)
+
+        max_week = max(20, max(week_numbers) if week_numbers else 20)
+        chars = ["-"] * max_week
+        for w in week_numbers:
+            if 1 <= w <= max_week:
+                chars[w - 1] = str(w % 10)
+        weeks_str = "".join(chars)
+    else:
+        weeks_str = "-" * 20
+
     return {
         "id": section.id,
         "section_code": section.section_code,
@@ -95,6 +122,7 @@ def _serialize_section(db: Session, section: CourseSection):
         "max_students": section.max_students,
         "status": section.status,
         "student_count": student_count,
+        "weeks_str": weeks_str,
         "created_at": section.created_at.isoformat() if section.created_at else None,
         "updated_at": section.updated_at.isoformat() if section.updated_at else None,
     }

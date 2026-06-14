@@ -343,6 +343,26 @@ export default function Sessions() {
       setAlertLoading(false)
     }
   }
+  const getWeeksStr = (session) => {
+    if (!session.section_id) return '-'
+    const group = sessions.filter(s => s.section_id === session.section_id)
+    if (group.length === 0) return '-'
+    const sorted = [...group].sort((a, b) => new Date(a.session_date) - new Date(b.session_date))
+    const minDate = new Date(sorted[0].session_date)
+    const weekNumbers = group.map(s => {
+      const diffTime = new Date(s.session_date) - minDate
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+      return Math.floor(diffDays / 7) + 1
+    })
+    const maxWeek = Math.max(20, ...weekNumbers)
+    const chars = Array(maxWeek).fill('-')
+    weekNumbers.forEach(w => {
+      if (w >= 1 && w <= maxWeek) {
+        chars[w - 1] = String(w % 10)
+      }
+    })
+    return chars.join('')
+  }
 
   // ---------------------------------------------------------------- //
   // Render
@@ -479,7 +499,7 @@ export default function Sessions() {
         <table className="data-table">
           <thead>
             <tr>
-              {['Mã buổi', 'Môn học', 'Lớp', 'Trạng thái', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Thao tác'].map((h) => (
+              {['Mã buổi', 'Môn học', 'Lớp', 'Trạng thái', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Tuần học', 'Thao tác'].map((h) => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
@@ -500,6 +520,9 @@ export default function Sessions() {
                   <td>{session.session_date}</td>
                   <td>{formatTime(session.start_time)}</td>
                   <td>{formatTime(session.end_time)}</td>
+                  <td style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '13px', color: 'var(--white2)' }}>
+                    {getWeeksStr(session)}
+                  </td>
                   <td>
                     <div className="toolbar">
                       <button
@@ -585,6 +608,12 @@ export default function Sessions() {
                   <span className="mobile-card-label">Thời gian:</span>
                   <span className="mobile-card-value">
                     {formatTime(session.start_time)} - {formatTime(session.end_time)}
+                  </span>
+                </div>
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">Tuần học:</span>
+                  <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em' }}>
+                    {getWeeksStr(session)}
                   </span>
                 </div>
                 <div className="mobile-card-actions">

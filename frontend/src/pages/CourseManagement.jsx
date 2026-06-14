@@ -808,13 +808,14 @@ export default function CourseManagement() {
                     <th>Học kỳ / Năm học</th>
                     <th>Giảng viên</th>
                     <th>Sĩ số</th>
+                    <th>Tuần học</th>
                     <th>Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sections.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>
+                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 28 }}>
                         Chưa có lớp học phần nào được tạo.
                       </td>
                     </tr>
@@ -839,6 +840,9 @@ export default function CourseManagement() {
                         <td>{sec.lecturer_name || '-'}</td>
                         <td>
                           <span style={{ fontFamily: 'var(--mono)', fontWeight: 600 }}>{sec.student_count} sv</span>
+                        </td>
+                        <td style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '13px', color: 'var(--white2)' }}>
+                          {sec.weeks_str || '-'}
                         </td>
                         <td>
                           <div className="toolbar">
@@ -882,6 +886,10 @@ export default function CourseManagement() {
                   <div className="mobile-card-row">
                     <span className="mobile-card-label">Giảng viên:</span>
                     <span className="mobile-card-value">{sec.lecturer_name || '-'}</span>
+                  </div>
+                  <div className="mobile-card-row">
+                    <span className="mobile-card-label">Tuần học:</span>
+                    <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em' }}>{sec.weeks_str || '-'}</span>
                   </div>
                   <div className="mobile-card-actions">
                     <button className="secondary" onClick={() => setSelectedSecId(sec.id)}>

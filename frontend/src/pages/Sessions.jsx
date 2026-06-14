@@ -51,6 +51,16 @@ const formatDateStr = (dateStr) => {
   return dateStr
 }
 
+const parseDisplayDateToISO = (displayStr) => {
+  if (!displayStr) return ''
+  const trimmed = displayStr.trim()
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
+    const [d, m, y] = trimmed.split('/')
+    return `${y}-${m}-${d}`
+  }
+  return trimmed
+}
+
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
 // ------------------------------------------------------------------ //
@@ -242,11 +252,17 @@ export default function Sessions() {
       return
     }
 
+    const isoDate = parseDisplayDateToISO(form.session_date)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+      setErrors((prev) => ({ ...prev, session_date: 'Ngày học không hợp lệ. Vui lòng nhập đúng định dạng dd/mm/yyyy (vd: 15/06/2026).' }))
+      return
+    }
+
     const payload = {
       subject:      form.subject.trim(),
       class_name:   form.class_name,
       section_group: form.section_group ? form.section_group.trim() : null,
-      session_date: form.session_date,
+      session_date: isoDate,
       start_time:   form.start_time,
       end_time:     form.end_time,
       created_by:   null,
@@ -276,7 +292,7 @@ export default function Sessions() {
       subject:      session.subject      || '',
       class_name:   session.class_name   || '',
       section_group: session.section_group || '',
-      session_date: session.session_date || '',
+      session_date: formatDateStr(session.session_date) || '',
       start_time:   toTimeInput(session.start_time),
       end_time:     toTimeInput(session.end_time),
     })
@@ -460,7 +476,8 @@ export default function Sessions() {
             {/* Ngày học */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <input
-                type="date"
+                type="text"
+                placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
                 value={form.session_date}
                 onChange={(e) => handleChange('session_date', e.target.value)}
                 style={errors.session_date ? { borderColor: '#e53e3e' } : {}}

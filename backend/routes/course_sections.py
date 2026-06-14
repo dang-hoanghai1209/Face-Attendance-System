@@ -33,7 +33,7 @@ def _validate_class(v: Optional[str]) -> Optional[str]:
 
 
 class CourseSectionCreate(BaseModel):
-    section_code: str
+    section_code: Optional[str] = None
     class_name: Optional[str] = None
     section_group: Optional[str] = None
     subject_id: int
@@ -48,6 +48,8 @@ class CourseSectionCreate(BaseModel):
     @field_validator("section_code")
     @classmethod
     def validate_section_code(cls, value):
+        if value is None:
+            return value
         value = value.strip()
         if not value:
             raise ValueError("Vui lòng nhập mã lớp học phần.")
@@ -208,7 +210,21 @@ def get_course_sections(
 @router.post("/")
 def create_course_section(data: CourseSectionCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     _ensure_subject_exists(db, data.subject_id)
-    section = CourseSection(**data.model_dump())
+    
+    section_code = data.section_code
+    if not section_code or not section_code.strip():
+        subject = db.query(Subject).filter(Subject.id == data.subject_id).first()
+        if subject and subject.subject_code:
+            section_code = subject.subject_code
+        else:
+            raise HTTPException(status_code=400, detail="Không thể tự điền Mã học phần do thiếu thông tin môn học.")
+            
+    if not section_code:
+        raise HTTPException(status_code=400, detail="Mã học phần là bắt buộc.")
+        
+    dumped = data.model_dump()
+    dumped["section_code"] = section_code
+    section = CourseSection(**dumped)
     db.add(section)
     try:
         db.commit()
@@ -232,6 +248,24 @@ def update_course_section(
     updates = data.model_dump(exclude_unset=True)
     if "subject_id" in updates:
         _ensure_subject_exists(db, updates["subject_id"])
+        
+    final_section_code = updates.get("section_code", section.section_code)
+    final_subject_id = updates.get("subject_id", section.subject_id)
+    
+    if not final_section_code or not final_section_code.strip():
+        if final_subject_id:
+            subject = db.query(Subject).filter(Subject.id == final_subject_id).first()
+            if subject and subject.subject_code:
+                final_section_code = subject.subject_code
+                updates["section_code"] = final_section_code
+            else:
+                raise HTTPException(status_code=400, detail="Không thể tự điền Mã học phần do thiếu thông tin môn học.")
+        else:
+            raise HTTPException(status_code=400, detail="Mã học phần và môn học không được để trống.")
+            
+    if not final_section_code:
+        raise HTTPException(status_code=400, detail="Mã học phần là bắt buộc.")
+        
     for field, value in updates.items():
         setattr(section, field, value)
     try:

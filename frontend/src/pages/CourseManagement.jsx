@@ -224,12 +224,15 @@ export default function CourseManagement() {
   }, [notify])
 
   const handleSaveSection = async () => {
-    if (!secForm.section_code.trim() || !secForm.class_name || !secForm.subject_id) {
-      notify('Vui lòng nhập Mã học phần, chọn Lớp sinh viên và chọn Học phần.', 'error')
+    if (!secForm.class_name || !secForm.subject_id) {
+      notify('Vui lòng chọn Lớp sinh viên và chọn Học phần.', 'error')
       return
     }
+    const selectedSubject = subjects.find(sb => sb.id === parseInt(secForm.subject_id, 10))
+    const resolvedSectionCode = selectedSubject ? selectedSubject.subject_code : ''
+
     const payload = {
-      section_code: secForm.section_code.trim(),
+      section_code: resolvedSectionCode,
       class_name: secForm.class_name,
       section_group: secForm.section_group ? secForm.section_group.trim() : null,
       subject_id: parseInt(secForm.subject_id, 10),
@@ -763,13 +766,16 @@ export default function CourseManagement() {
               <div className="form-grid" style={{ marginBottom: 12 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-                    Mã học phần / Mã lớp học phần
+                    Mã học phần / Môn học phần
                   </label>
-                  <input
-                    placeholder="Mã học phần (vd: INS-631)"
-                    value={secForm.section_code}
-                    onChange={(e) => setSecForm({ ...secForm, section_code: e.target.value })}
-                  />
+                  <select value={secForm.subject_id} onChange={(e) => setSecForm({ ...secForm, subject_id: e.target.value })}>
+                    <option value="">-- Chọn mã học phần --</option>
+                    {subjects.map((sb) => (
+                      <option key={sb.id} value={sb.id}>
+                        {sb.subject_code} - {sb.subject_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
@@ -794,19 +800,6 @@ export default function CourseManagement() {
                     value={secForm.section_group}
                     onChange={(e) => setSecForm({ ...secForm, section_group: e.target.value })}
                   />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-                    Tên học phần
-                  </label>
-                  <select value={secForm.subject_id} onChange={(e) => setSecForm({ ...secForm, subject_id: e.target.value })}>
-                    <option value="">-- Chọn Môn học --</option>
-                    {subjects.map((sb) => (
-                      <option key={sb.id} value={sb.id}>
-                        {sb.subject_code} - {sb.subject_name}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>

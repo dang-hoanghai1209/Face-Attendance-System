@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from database import Base
@@ -11,7 +12,10 @@ class Session(Base):
     id = Column(Integer, primary_key=True, index=True)
     subject = Column(String(100))
     class_name = Column(String(50))
+    section_group = Column(String(30), nullable=True)
     section_id = Column(Integer, ForeignKey("course_sections.id"), nullable=True, index=True)
+
+    section = relationship("CourseSection", foreign_keys=[section_id])
     classroom_id = Column(Integer, ForeignKey("classrooms.id"), nullable=True, index=True)
     latitude = Column(Float)
     longitude = Column(Float)

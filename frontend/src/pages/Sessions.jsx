@@ -10,6 +10,7 @@ import { getApiErrorMessage } from '../utils/apiError.js'
 const initialForm = {
   subject:      '',
   class_name:   '',
+  section_group: '',
   session_date: '',
   start_time:   '',
   end_time:     '',
@@ -17,6 +18,7 @@ const initialForm = {
 const emptyErrors = {
   subject:    '',
   class_name: '',
+  section_group: '',
   session_date: '',
   start_time: '',
   end_time: '',
@@ -208,6 +210,7 @@ export default function Sessions() {
       String(s.id).includes(keyword) ||
       s.subject?.toLowerCase().includes(keyword) ||
       s.class_name?.toLowerCase().includes(keyword) ||
+      s.section_group?.toLowerCase().includes(keyword) ||
       s.session_date?.includes(keyword)
     )
   }, [sessions, search])
@@ -233,6 +236,7 @@ export default function Sessions() {
     const payload = {
       subject:      form.subject.trim(),
       class_name:   form.class_name,
+      section_group: form.section_group ? form.section_group.trim() : null,
       session_date: form.session_date,
       start_time:   form.start_time,
       end_time:     form.end_time,
@@ -262,6 +266,7 @@ export default function Sessions() {
     setForm({
       subject:      session.subject      || '',
       class_name:   session.class_name   || '',
+      section_group: session.section_group || '',
       session_date: session.session_date || '',
       start_time:   toTimeInput(session.start_time),
       end_time:     toTimeInput(session.end_time),
@@ -429,6 +434,20 @@ export default function Sessions() {
               )}
             </div>
 
+            {/* Nhóm học phần — readonly */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <input
+                type="text"
+                value={form.section_group}
+                placeholder="Nhóm học phần (Đọc từ Lớp HP)"
+                readOnly
+                style={{ opacity: 0.7, cursor: 'not-allowed', background: 'rgba(255,255,255,0.05)' }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                Nhóm học phần (Chỉ đọc)
+              </span>
+            </div>
+
             {/* Ngày học */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <input
@@ -499,7 +518,7 @@ export default function Sessions() {
         <table className="data-table">
           <thead>
             <tr>
-              {['Mã buổi', 'Môn học', 'Lớp', 'Trạng thái', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Tuần học', 'Thao tác'].map((h) => (
+              {['Mã buổi', 'Môn học', 'Nhóm', 'Lớp', 'Trạng thái', 'Ngày', 'Bắt đầu', 'Kết thúc', 'Tuần học', 'Thao tác'].map((h) => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
@@ -511,6 +530,7 @@ export default function Sessions() {
                 <tr key={session.id}>
                   <td>#{session.id}</td>
                   <td>{session.subject}{session.session_number ? ` (Buổi ${session.session_number})` : ''}</td>
+                  <td style={{ fontWeight: 600, color: 'var(--teal)' }}>{session.section_group || '-'}</td>
                   <td>{session.class_name}</td>
                   <td>
                     <span className={status.badgeClass}>
@@ -587,6 +607,10 @@ export default function Sessions() {
                   <span className="badge success" style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>
                     #{session.id}
                   </span>
+                </div>
+                <div className="mobile-card-row">
+                  <span className="mobile-card-label">Nhóm:</span>
+                  <span className="mobile-card-value" style={{ fontWeight: 600, color: 'var(--teal)' }}>{session.section_group || '-'}</span>
                 </div>
                 <div className="mobile-card-row">
                   <span className="mobile-card-label">Lớp:</span>

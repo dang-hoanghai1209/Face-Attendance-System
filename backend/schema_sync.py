@@ -503,6 +503,9 @@ def sync_schema(engine):
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN room_name VARCHAR(100)"))
             if "session_number" not in columns:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN session_number INTEGER"))
+            if "section_group" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN section_group VARCHAR(30)"))
+                columns.add("section_group")
 
             connection.execute(text("UPDATE sessions SET start_time = '07:00:00' WHERE start_time IS NULL"))
             connection.execute(text("UPDATE sessions SET end_time = '09:00:00' WHERE end_time IS NULL"))
@@ -520,6 +523,9 @@ def sync_schema(engine):
                     "  AND REPLACE(REPLACE(section_code, '-', ''), ' ', '') IN "
                     "('63TTQL', '63HTTT', '63CNTT', '63LFW', '64TTQL', '64HTTT', '64CNTT', '64LFW')"
                 ))
+            if "section_group" not in columns:
+                connection.execute(text("ALTER TABLE course_sections ADD COLUMN section_group VARCHAR(30)"))
+                columns.add("section_group")
 
         if "attendance" in tables:
             _sync_attendance_columns(connection, "attendance", _get_columns(inspector, "attendance"))

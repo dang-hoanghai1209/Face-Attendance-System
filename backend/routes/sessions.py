@@ -1,5 +1,5 @@
-from datetime import date, time, timedelta
-from typing import Optional
+from datetime import date, time, timedelta, datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
@@ -34,6 +34,15 @@ def _validate_class(v: Optional[str]) -> Optional[str]:
     return v_stripped
 
 
+def _validate_section_group(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return value
+    trimmed = value.strip()
+    if len(trimmed) > 30:
+        raise ValueError("Nhóm học phần tối đa 30 ký tự.")
+    return trimmed
+
+
 def _validate_time_range(start_time: Optional[time], end_time: Optional[time]) -> None:
     if start_time is None:
         raise ValueError("Vui lòng nhập thời gian bắt đầu.")
@@ -46,6 +55,7 @@ def _validate_time_range(start_time: Optional[time], end_time: Optional[time]) -
 class SessionCreate(BaseModel):
     subject: str
     class_name: str
+    section_group: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     radius_meters: Optional[int] = 50
@@ -61,6 +71,11 @@ class SessionCreate(BaseModel):
     def check_class(cls, v):
         return _validate_class(v)
 
+    @field_validator("section_group")
+    @classmethod
+    def validate_section_group(cls, v):
+        return _validate_section_group(v)
+
     @model_validator(mode="after")
     def check_time_range(self):
         _validate_time_range(self.start_time, self.end_time)
@@ -70,6 +85,7 @@ class SessionCreate(BaseModel):
 class SessionUpdate(BaseModel):
     subject: Optional[str] = None
     class_name: Optional[str] = None
+    section_group: Optional[str] = None
     session_date: Optional[date] = None
     start_time: Optional[time] = None
     end_time: Optional[time] = None
@@ -80,6 +96,54 @@ class SessionUpdate(BaseModel):
     @classmethod
     def check_class(cls, v):
         return _validate_class(v)
+
+    @field_validator("section_group")
+    @classmethod
+    def validate_section_group(cls, v):
+        return _validate_section_group(v)
+
+
+class SessionResponse(BaseModel):
+    id: int
+    subject: Optional[str] = None
+    class_name: Optional[str] = None
+    section_group: Optional[str] = None
+    section_id: Optional[int] = None
+    classroom_id: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_meters: Optional[int] = None
+    room_name: Optional[str] = None
+    session_date: date
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    session_number: Optional[int] = None
+    note: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {
+        "from_attributes": True
+    }
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_section_group(cls, data):
+        if isinstance(data, dict):
+            return data
+        
+        # data is a ClassSession SQLAlchemy model object.
+        # Construct dict of its columns
+        d = {}
+        for col in data.__table__.columns:
+            d[col.name] = getattr(data, col.name)
+            
+        group = d.get("section_group")
+        if (not group or not group.strip()) and data.section_id:
+            # lazy load course section
+            if getattr(data, "section", None):
+                d["section_group"] = data.section.section_group
+        return d
 
 
 class SessionFromSectionCreate(BaseModel):
@@ -104,12 +168,12 @@ class SessionFromSectionCreate(BaseModel):
         return self
 
 
-@router.get("/")
+@router.get("/", response_model=List[SessionResponse])
 def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depends(get_db)):
     return db.query(ClassSession).order_by(ClassSession.session_date.desc()).all()
 
 
-@router.post("/")
+@router.post("/", response_model=SessionResponse)
 def create_session(session_data: SessionCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     if session_data.latitude is None or session_data.longitude is None:
         raise HTTPException(status_code=422, detail=MISSING_GPS_MESSAGE)
@@ -121,7 +185,7 @@ def create_session(session_data: SessionCreate, _current_user=Depends(require_ad
     return new_session
 
 
-@router.post("/from-section")
+@router.post("/from-section", response_model=SessionResponse)
 def create_session_from_section(
     session_data: SessionFromSectionCreate,
     _current_user=Depends(require_admin),
@@ -179,6 +243,7 @@ def create_session_from_section(
         new_session = ClassSession(
             subject=subject.subject_name if subject else section.section_code,
             class_name=section.class_name,
+            section_group=section.section_group,
             section_id=section.id,
             classroom_id=classroom.id,
             latitude=classroom.gps_lat,
@@ -206,7 +271,7 @@ def create_session_from_section(
     return created_sessions[0]
 
 
-@router.put("/{session_id}")
+@router.put("/{session_id}", response_model=SessionResponse)
 def update_session(
     session_id: int,
     session_data: SessionUpdate,

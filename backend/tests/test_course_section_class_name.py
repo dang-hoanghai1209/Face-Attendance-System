@@ -245,6 +245,40 @@ class CourseSectionClassNameTests(unittest.TestCase):
         db_session = self.db.query(ClassSession).filter(ClassSession.id == session.id).first()
         self.assertIsNone(db_session)
 
+    def test_create_session_from_section_copies_section_group(self):
+        # Create course section with section_group = "02"
+        section = create_course_section(
+            CourseSectionCreate(
+                section_code="INS-631",
+                class_name="64CNTT",
+                section_group="02",
+                subject_id=self.subject.id,
+                semester="2026-1",
+                academic_year="2025-2026",
+                lecturer_name="Giảng viên A",
+                status="open",
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        # Create session from section
+        session = create_session_from_section(
+            SessionFromSectionCreate(
+                section_id=section["id"],
+                classroom_id=self.classroom.id,
+                session_date=date(2026, 6, 15),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+                note="Buổi học 1",
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        self.assertEqual(session.section_group, "02")
+
+
 
 if __name__ == "__main__":
     unittest.main()

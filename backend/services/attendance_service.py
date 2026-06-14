@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -96,21 +97,31 @@ def get_session_or_404(db: Session, session_id: int):
 
 
 def _is_student_enrolled_in_session(db: Session, student: Student, session: ClassSession):
+    filters = [
+        (Enrollment.session_id == session.id) & (Enrollment.student_id == student.id)
+    ]
+    if session.section_id:
+        filters.append(
+            (Enrollment.course_section_id == session.section_id) & (Enrollment.student_id == student.id) & (Enrollment.status == "active")
+        )
     return (
         db.query(Enrollment)
-        .filter(
-            Enrollment.session_id == session.id,
-            Enrollment.student_id == student.id,
-        )
+        .filter(or_(*filters))
         .first()
         is not None
     )
 
 
 def count_session_enrollments(db: Session, session: ClassSession):
+    filters = [Enrollment.session_id == session.id]
+    if session.section_id:
+        filters.append(
+            (Enrollment.course_section_id == session.section_id) & (Enrollment.status == "active")
+        )
     return (
-        db.query(Enrollment)
-        .filter(Enrollment.session_id == session.id)
+        db.query(Enrollment.student_id)
+        .filter(or_(*filters))
+        .distinct()
         .count()
     )
 

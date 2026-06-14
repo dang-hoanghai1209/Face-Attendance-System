@@ -316,12 +316,26 @@ export default function CourseManagement() {
   // ════════════════════════════════════════════════════════════════
   // 4. STATE & LOGIC CHO XẾP BUỔI HỌC (SCHEDULE SESSIONS)
   // ════════════════════════════════════════════════════════════════
-  const [schedForm, setSchedForm] = useState({ section_id: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '' })
+  const [schedForm, setSchedForm] = useState({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '' })
   const [schedLoading, setSchedLoading] = useState(false)
+
+  const handleRoomNameChange = (name) => {
+    const matched = classrooms.find(cr => cr.name.toLowerCase() === name.trim().toLowerCase() && cr.is_active)
+    setSchedForm(prev => ({
+      ...prev,
+      room_name: name,
+      classroom_id: matched ? matched.id : ''
+    }))
+  }
+
+  const selectedRoom = useMemo(() => {
+    if (!schedForm.classroom_id) return null
+    return classrooms.find(cr => cr.id === parseInt(schedForm.classroom_id, 10))
+  }, [schedForm.classroom_id, classrooms])
 
   const handleScheduleSession = async () => {
     if (!schedForm.section_id || !schedForm.classroom_id || !schedForm.session_date || !schedForm.start_time || !schedForm.end_time) {
-      notify('Vui lòng điền đầy đủ các trường thông tin xếp lịch học.', 'error')
+      notify('Vui lòng điền hoặc chọn đúng tên phòng học đã được cấu hình GPS và điền đầy đủ các thông tin.', 'error')
       return
     }
     if (schedForm.end_time <= schedForm.start_time) {
@@ -341,7 +355,7 @@ export default function CourseManagement() {
     try {
       await api.post('/sessions/from-section', payload)
       notify('Tạo buổi học từ lớp học phần và phòng học thành công.')
-      setSchedForm({ section_id: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '' })
+      setSchedForm({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '' })
     } catch (e) {
       notify(getApiErrorMessage(e, 'Không tạo được buổi học.'), 'error')
     } finally {
@@ -998,17 +1012,29 @@ export default function CourseManagement() {
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
                   Phòng học điểm danh
                 </label>
-                <select
-                  value={schedForm.classroom_id}
-                  onChange={(e) => setSchedForm({ ...schedForm, classroom_id: e.target.value })}
-                >
-                  <option value="">-- Chọn phòng học GPS --</option>
+                <input
+                  type="text"
+                  list="sched-classroom-options"
+                  placeholder="Nhập tên phòng học (vd: G6-101)"
+                  value={schedForm.room_name}
+                  onChange={(e) => handleRoomNameChange(e.target.value)}
+                />
+                <datalist id="sched-classroom-options">
                   {classrooms.filter(cr => cr.is_active).map((cr) => (
-                    <option key={cr.id} value={cr.id}>
-                      {cr.name} ({cr.building || 'Chưa rõ khu'}) - Bán kính {cr.radius_meters}m
+                    <option key={cr.id} value={cr.name}>
+                      {cr.building ? `${cr.building} - ` : ''}Bán kính {cr.radius_meters}m
                     </option>
                   ))}
-                </select>
+                </datalist>
+                {selectedRoom ? (
+                  <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>📍 GPS: {selectedRoom.gps_lat}, {selectedRoom.gps_lng} (Bán kính {selectedRoom.radius_meters}m)</span>
+                  </div>
+                ) : schedForm.room_name ? (
+                  <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 2 }}>
+                    ⚠️ Phòng học chưa được đăng ký hoặc tọa độ GPS chưa sẵn sàng.
+                  </div>
+                ) : null}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

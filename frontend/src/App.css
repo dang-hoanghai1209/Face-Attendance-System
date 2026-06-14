@@ -632,3 +632,19 @@ textarea { min-height: 90px; resize: vertical; }
   }
 }
 
+/* ── Session Status Badges ── */
+.badge.info {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--blue);
+}
+.badge.info::before {
+  background: var(--blue);
+}
+.badge.muted {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+.badge.muted::before {
+  background: var(--muted);
+}
+

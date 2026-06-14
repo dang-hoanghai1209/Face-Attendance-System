@@ -6,6 +6,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.attendance import Attendance
+from models.attendance_scan import AttendanceScan
+from models.recognition_attempt import RecognitionAttempt
 from models.course_section import CourseSection
 from models.enrollment import Enrollment
 from models.session import Session as ClassSession
@@ -222,13 +225,29 @@ def delete_course_section(section_id: int, _current_user=Depends(require_admin),
     section = db.query(CourseSection).filter(CourseSection.id == section_id).first()
     if not section:
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học phần.")
-    used = db.query(ClassSession).filter(ClassSession.section_id == section_id).first()
-    if used:
-        raise HTTPException(status_code=400, detail="Không thể xóa lớp học phần đang có buổi học.")
+
+    # Cascade delete all sessions of this course section
+    sessions = db.query(ClassSession).filter(ClassSession.section_id == section_id).all()
+    for session in sessions:
+        attendance_ids = [
+            row.id
+            for row in db.query(Attendance.id).filter(Attendance.session_id == session.id).all()
+        ]
+        if attendance_ids:
+            db.query(AttendanceScan).filter(AttendanceScan.attendance_id.in_(attendance_ids)).delete(
+                synchronize_session=False
+            )
+        db.query(Attendance).filter(Attendance.session_id == session.id).delete(synchronize_session=False)
+        db.query(RecognitionAttempt).filter(RecognitionAttempt.session_id == session.id).delete()
+        db.delete(session)
+
+    # Delete enrollments
     db.query(Enrollment).filter(Enrollment.course_section_id == section_id).delete()
+
+    # Delete the section
     db.delete(section)
     db.commit()
-    return {"message": "Đã xóa lớp học phần."}
+    return {"message": "Đã xóa lớp học phần cùng các buổi học và đăng ký liên quan."}
 
 
 @router.get("/{section_id}/students")

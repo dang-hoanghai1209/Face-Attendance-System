@@ -13,7 +13,7 @@ from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.session import Session as ClassSession
 from models.subject import Subject
-from routes.course_sections import CourseSectionCreate, create_course_section
+from routes.course_sections import CourseSectionCreate, create_course_section, delete_course_section
 from routes.sessions import SessionFromSectionCreate, create_session_from_section, SessionUpdate, update_session
 
 
@@ -200,6 +200,50 @@ class CourseSectionClassNameTests(unittest.TestCase):
         )
 
         self.assertEqual(updated.class_name, "63TTQL")
+
+    def test_delete_course_section_cascade_deletes_sessions(self):
+        # Create course section
+        section = create_course_section(
+            CourseSectionCreate(
+                section_code="INS-631",
+                class_name="64CNTT",
+                subject_id=self.subject.id,
+                semester="2026-1",
+                academic_year="2025-2026",
+                lecturer_name="Giảng viên A",
+                status="open",
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        # Create session from section
+        session = create_session_from_section(
+            SessionFromSectionCreate(
+                section_id=section["id"],
+                classroom_id=self.classroom.id,
+                session_date=date(2026, 6, 15),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+                note="Buổi học 1",
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        # Confirm session exists
+        db_session = self.db.query(ClassSession).filter(ClassSession.id == session.id).first()
+        self.assertIsNotNone(db_session)
+
+        # Call delete_course_section
+        res = delete_course_section(section["id"], _current_user=None, db=self.db)
+        self.assertEqual(res["message"], "Đã xóa lớp học phần cùng các buổi học và đăng ký liên quan.")
+
+        # Confirm section and session are deleted
+        db_section = self.db.query(CourseSection).filter(CourseSection.id == section["id"]).first()
+        self.assertIsNone(db_section)
+        db_session = self.db.query(ClassSession).filter(ClassSession.id == session.id).first()
+        self.assertIsNone(db_session)
 
 
 if __name__ == "__main__":

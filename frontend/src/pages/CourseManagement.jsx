@@ -261,11 +261,11 @@ export default function CourseManagement() {
   }
 
   const handleDeleteSection = async (id, code) => {
-    if (!window.confirm(`Bạn có chắc muốn xóa lớp học phần "${code}" không? Các đăng ký xếp lớp liên quan sẽ bị xóa.`)) return
+    if (!window.confirm(`Bạn có chắc muốn xóa lớp học phần "${code}" không? Tất cả buổi học, dữ liệu điểm danh và danh sách sinh viên xếp lớp liên quan sẽ bị xóa hoàn toàn.`)) return
     setSecLoading(true)
     try {
       await api.delete(`/course-sections/${id}`)
-      notify('Đã xóa lớp học phần.')
+      notify('Đã xóa lớp học phần cùng các dữ liệu liên quan.')
       if (secEditingId === id) {
         setSecEditingId(null)
         setSecForm({ section_code: '', subject_id: '', class_name: '', semester: '', academic_year: '2025-2026', lecturer_name: '', status: 'open' })
@@ -273,7 +273,7 @@ export default function CourseManagement() {
       if (selectedSecId === id) setSelectedSecId(null)
       fetchSections()
     } catch (e) {
-      notify(getApiErrorMessage(e, 'Không xóa được lớp học phần (Có thể lớp đang có buổi học).'), 'error')
+      notify(getApiErrorMessage(e, 'Không xóa được lớp học phần.'), 'error')
     } finally {
       setSecLoading(false)
     }

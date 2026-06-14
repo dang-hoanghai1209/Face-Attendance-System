@@ -61,6 +61,22 @@ const parseDisplayDateToISO = (displayStr) => {
   return trimmed
 }
 
+const formatToDateMask = (value) => {
+  let clean = value.replace(/\D/g, '')
+  if (clean.length > 8) clean = clean.slice(0, 8)
+  let formatted = ''
+  if (clean.length > 0) {
+    formatted = clean.slice(0, 2)
+    if (clean.length > 2) {
+      formatted += '/' + clean.slice(2, 4)
+      if (clean.length > 4) {
+        formatted += '/' + clean.slice(4, 8)
+      }
+    }
+  }
+  return formatted
+}
+
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
 // ------------------------------------------------------------------ //
@@ -481,7 +497,7 @@ export default function Sessions() {
                   type="text"
                   placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
                   value={form.session_date}
-                  onChange={(e) => handleChange('session_date', e.target.value)}
+                  onChange={(e) => handleChange('session_date', formatToDateMask(e.target.value))}
                   style={errors.session_date ? { borderColor: '#e53e3e', paddingRight: '40px', width: '100%' } : { paddingRight: '40px', width: '100%' }}
                 />
                 <button

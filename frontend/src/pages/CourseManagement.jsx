@@ -14,6 +14,22 @@ const parseDisplayDateToISO = (displayStr) => {
   return trimmed
 }
 
+const formatToDateMask = (value) => {
+  let clean = value.replace(/\D/g, '')
+  if (clean.length > 8) clean = clean.slice(0, 8)
+  let formatted = ''
+  if (clean.length > 0) {
+    formatted = clean.slice(0, 2)
+    if (clean.length > 2) {
+      formatted += '/' + clean.slice(2, 4)
+      if (clean.length > 4) {
+        formatted += '/' + clean.slice(4, 8)
+      }
+    }
+  }
+  return formatted
+}
+
 export default function CourseManagement() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('classrooms')
@@ -1142,7 +1158,7 @@ export default function CourseManagement() {
                     type="text"
                     placeholder="dd/mm/yyyy (Ví dụ: 15/06/2026)"
                     value={schedForm.session_date}
-                    onChange={(e) => setSchedForm({ ...schedForm, session_date: e.target.value })}
+                    onChange={(e) => setSchedForm({ ...schedForm, session_date: formatToDateMask(e.target.value) })}
                     style={{ paddingRight: '40px', width: '100%' }}
                   />
                   <button

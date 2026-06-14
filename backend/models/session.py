@@ -20,6 +20,7 @@ class Session(Base):
     session_date = Column(Date, nullable=False)
     start_time = Column(Time)
     end_time = Column(Time)
+    session_number = Column(Integer, nullable=True)
     note = Column(Text)
     created_by = Column(String(50))
     created_at = Column(DateTime, server_default=func.now())

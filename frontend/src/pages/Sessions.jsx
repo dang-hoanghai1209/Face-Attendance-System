@@ -485,7 +485,7 @@ export default function Sessions() {
               return (
                 <tr key={session.id}>
                   <td>#{session.id}</td>
-                  <td>{session.subject}</td>
+                  <td>{session.subject}{session.session_number ? ` (Buổi ${session.session_number})` : ''}</td>
                   <td>{session.class_name}</td>
                   <td>
                     <span className={status.badgeClass}>
@@ -554,7 +554,7 @@ export default function Sessions() {
               <div key={session.id} className="mobile-card">
                 <div className="mobile-card-header">
                   <span className="mobile-card-title" style={{ color: 'var(--teal)', fontWeight: 700 }}>
-                    {session.subject}
+                    {session.subject}{session.session_number ? ` (Buổi ${session.session_number})` : ''}
                   </span>
                   <span className="badge success" style={{ fontFamily: 'var(--mono)', fontSize: '11px' }}>
                     #{session.id}

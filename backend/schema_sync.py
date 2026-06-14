@@ -501,6 +501,8 @@ def sync_schema(engine):
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN radius_meters INTEGER DEFAULT 50"))
             if "room_name" not in columns:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN room_name VARCHAR(100)"))
+            if "session_number" not in columns:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN session_number INTEGER"))
 
             connection.execute(text("UPDATE sessions SET start_time = '07:00:00' WHERE start_time IS NULL"))
             connection.execute(text("UPDATE sessions SET end_time = '09:00:00' WHERE end_time IS NULL"))

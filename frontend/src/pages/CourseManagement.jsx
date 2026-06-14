@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../../api/axios.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 
 export default function CourseManagement() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('classrooms')
   const [message, setMessage] = useState('')
   const [msgType, setMsgType] = useState('ok')
@@ -316,7 +318,7 @@ export default function CourseManagement() {
   // ════════════════════════════════════════════════════════════════
   // 4. STATE & LOGIC CHO XẾP BUỔI HỌC (SCHEDULE SESSIONS)
   // ════════════════════════════════════════════════════════════════
-  const [schedForm, setSchedForm] = useState({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '' })
+  const [schedForm, setSchedForm] = useState({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '', weeks: 1 })
   const [schedLoading, setSchedLoading] = useState(false)
 
   const handleRoomNameChange = (name) => {
@@ -343,6 +345,12 @@ export default function CourseManagement() {
       return
     }
 
+    const weeksVal = parseInt(schedForm.weeks, 10)
+    if (isNaN(weeksVal) || weeksVal < 1 || weeksVal > 20) {
+      notify('Số tuần học phải là số nguyên từ 1 đến 20.', 'error')
+      return
+    }
+
     const payload = {
       section_id: parseInt(schedForm.section_id, 10),
       classroom_id: parseInt(schedForm.classroom_id, 10),
@@ -350,12 +358,16 @@ export default function CourseManagement() {
       start_time: schedForm.start_time + (schedForm.start_time.length === 5 ? ':00' : ''),
       end_time: schedForm.end_time + (schedForm.end_time.length === 5 ? ':00' : ''),
       note: schedForm.note.trim() || null,
+      weeks: weeksVal,
     }
     setSchedLoading(true)
     try {
       await api.post('/sessions/from-section', payload)
-      notify('Tạo buổi học từ lớp học phần và phòng học thành công.')
-      setSchedForm({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '' })
+      notify('Tạo chuỗi buổi học theo tuần thành công. Đang chuyển hướng...')
+      setSchedForm({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '', weeks: 1 })
+      setTimeout(() => {
+        navigate('/sessions')
+      }, 1500)
     } catch (e) {
       notify(getApiErrorMessage(e, 'Không tạo được buổi học.'), 'error')
     } finally {
@@ -1039,12 +1051,25 @@ export default function CourseManagement() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-                  Ngày học
+                  Ngày học (Ngày bắt đầu)
                 </label>
                 <input
                   type="date"
                   value={schedForm.session_date}
                   onChange={(e) => setSchedForm({ ...schedForm, session_date: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
+                  Số tuần học liên tiếp
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={schedForm.weeks}
+                  onChange={(e) => setSchedForm({ ...schedForm, weeks: e.target.value })}
                 />
               </div>
 

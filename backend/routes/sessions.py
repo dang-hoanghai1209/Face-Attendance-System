@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -52,6 +52,7 @@ class SessionCreate(BaseModel):
     session_date: date
     start_time: time
     end_time: time
+    session_number: Optional[int] = None
     created_by: Optional[str] = None
 
     @field_validator("class_name")
@@ -71,6 +72,7 @@ class SessionUpdate(BaseModel):
     session_date: Optional[date] = None
     start_time: Optional[time] = None
     end_time: Optional[time] = None
+    session_number: Optional[int] = None
     created_by: Optional[str] = None
 
     @field_validator("class_name")
@@ -86,6 +88,14 @@ class SessionFromSectionCreate(BaseModel):
     start_time: time
     end_time: time
     note: Optional[str] = None
+    weeks: Optional[int] = 1
+
+    @field_validator("weeks")
+    @classmethod
+    def check_weeks(cls, v):
+        if v is not None and (v < 1 or v > 20):
+            raise ValueError("Số tuần học phải từ 1 đến 20.")
+        return v
 
     @model_validator(mode="after")
     def check_time_range(self):
@@ -127,25 +137,45 @@ def create_session_from_section(
         raise HTTPException(status_code=400, detail="Phòng học này đang bị vô hiệu hóa.")
 
     subject = db.query(Subject).filter(Subject.id == section.subject_id).first()
-    new_session = ClassSession(
-        subject=subject.subject_name if subject else section.section_code,
-        class_name=section.section_code,
-        section_id=section.id,
-        classroom_id=classroom.id,
-        latitude=classroom.gps_lat,
-        longitude=classroom.gps_lng,
-        radius_meters=classroom.radius_meters,
-        room_name=classroom.name,
-        session_date=session_data.session_date,
-        start_time=session_data.start_time,
-        end_time=session_data.end_time,
-        note=session_data.note,
-        created_by=section.lecturer_name,
-    )
-    db.add(new_session)
+
+    existing_count = db.query(ClassSession).filter(ClassSession.section_id == section.id).count()
+    weeks_to_create = session_data.weeks or 1
+    created_sessions = []
+
+    for i in range(weeks_to_create):
+        current_date = session_data.session_date + timedelta(weeks=i)
+        current_number = existing_count + i + 1
+
+        note_suffix = f"[Buổi {current_number}]"
+        if session_data.note:
+            note_content = f"{session_data.note.strip()} {note_suffix}"
+        else:
+            note_content = note_suffix
+
+        new_session = ClassSession(
+            subject=subject.subject_name if subject else section.section_code,
+            class_name=section.section_code,
+            section_id=section.id,
+            classroom_id=classroom.id,
+            latitude=classroom.gps_lat,
+            longitude=classroom.gps_lng,
+            radius_meters=classroom.radius_meters,
+            room_name=classroom.name,
+            session_date=current_date,
+            start_time=session_data.start_time,
+            end_time=session_data.end_time,
+            session_number=current_number,
+            note=note_content,
+            created_by=section.lecturer_name,
+        )
+        db.add(new_session)
+        created_sessions.append(new_session)
+
     db.commit()
-    db.refresh(new_session)
-    return new_session
+    for s in created_sessions:
+        db.refresh(s)
+
+    return created_sessions[0]
 
 
 @router.put("/{session_id}")

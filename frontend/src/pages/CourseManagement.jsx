@@ -890,9 +890,9 @@ export default function CourseManagement() {
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>
                   Thêm sinh viên vào lớp
                 </label>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <select
-                    style={{ flex: 1 }}
+                    style={{ width: '100%' }}
                     value={enrollStudentId}
                     onChange={(e) => setEnrollStudentId(e.target.value)}
                   >
@@ -903,8 +903,12 @@ export default function CourseManagement() {
                       </option>
                     ))}
                   </select>
-                  <button onClick={handleAddEnrollment} disabled={secLoading} style={{ minHeight: 'unset' }}>
-                    Thêm
+                  <button
+                    onClick={handleAddEnrollment}
+                    disabled={secLoading}
+                    style={{ width: '100%', justifyContent: 'center' }}
+                  >
+                    Thêm vào lớp
                   </button>
                 </div>
               </div>

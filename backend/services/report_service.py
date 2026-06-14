@@ -12,8 +12,8 @@ from models.student import Student
 from services.auth_service import resolve_student_for_user
 
 
-ATTENDED_STATUSES = {"present", "late", "manual", "left_early"}
-STATUS_PRIORITY = {"manual": 4, "present": 3, "late": 2, "left_early": 1}
+ATTENDED_STATUSES = {"present", "late", "left_early"}
+STATUS_PRIORITY = {"present": 3, "late": 2, "left_early": 1}
 
 
 def official_student_filter():
@@ -67,7 +67,6 @@ def build_class_summary(class_name: str, db: Session):
         attended = sum(1 for record in effective_records if record.status in ATTENDED_STATUSES)
         present = sum(1 for record in effective_records if record.status == "present")
         late = sum(1 for record in effective_records if record.status == "late")
-        manual = sum(1 for record in effective_records if record.status == "manual")
         absent = max(total_sessions - attended, 0)
         rate = (attended / total_sessions) if total_sessions > 0 else 0
         result.append(
@@ -77,7 +76,6 @@ def build_class_summary(class_name: str, db: Session):
                 "class_name": student.class_name,
                 "present": present,
                 "late": late,
-                "manual": manual,
                 "absent": absent,
                 "attended": attended,
                 "total_sessions": total_sessions,

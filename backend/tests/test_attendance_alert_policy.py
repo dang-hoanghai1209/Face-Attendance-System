@@ -168,7 +168,7 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
 
         alerts = self.alerts("NOT_ENROLLED")
         self.assertEqual(response["status"], "not_enrolled")
-        self.assertEqual(response["message"], "Buổi học chưa có danh sách đăng ký sinh viên")
+        self.assertEqual(response["message"], "Sinh viên không thuộc lớp học phần này")
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].student_id, student.id)
         self.assertEqual(self.attendance_count(), 0)
@@ -188,7 +188,8 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
         )
 
         alerts = self.alerts("LATE_ENTRY")
-        self.assertEqual(response["status"], "late_entry")
+        self.assertEqual(response["status"], "expired")
+        self.assertEqual(response["message"], "Lớp học đã kết thúc điểm danh")
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].student_id, student.id)
         self.assertEqual(self.attendance_count(), 0)
@@ -212,7 +213,7 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
         self.assertEqual(self.attendance_count(), 1)
         self.assertEqual(len(self.alerts()), 0)
 
-    def test_uncertain_enrolled_student_proceeds_without_manual_confirmation(self):
+    def test_uncertain_enrolled_student_proceeds_without_manual_flow(self):
         student, session = self.add_enrolled_session()
         self.patch_now(datetime(2026, 6, 1, 7, 31))
 

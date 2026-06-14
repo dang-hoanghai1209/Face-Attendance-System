@@ -35,22 +35,6 @@ class AttendanceCheckOut(BaseModel):
     confidence: Optional[float] = None
 
 
-class ManualAttendanceCreate(BaseModel):
-    student_code: str
-    session_id: int
-    note: Optional[str] = None
-    audit_id: Optional[int] = None
-
-
-def require_manual_attendance_editor(current_user=Depends(get_current_user)):
-    if current_user.role not in {"admin", "teacher", "lecturer"}:
-        raise HTTPException(
-            status_code=403,
-            detail="Bạn không có quyền xác nhận điểm danh thủ công.",
-        )
-    return current_user
-
-
 def _checkin_response(db: Session, data: AttendanceCheckIn):
     try:
         return attendance_service.record_checkin(
@@ -107,29 +91,6 @@ def record_checkout(data: AttendanceCheckOut, current_user=Depends(get_current_u
         student_code=data.student_code,
         session_id=data.session_id,
         confidence=data.confidence,
-    )
-
-
-@router.post("/manual")
-def record_manual_attendance(
-    data: ManualAttendanceCreate,
-    current_user=Depends(require_manual_attendance_editor),
-    db: Session = Depends(get_db),
-):
-    logger.info(
-        "attendance manual request: session_id=%s student_code=%s audit_id=%s note_present=%s user=%s",
-        data.session_id,
-        data.student_code,
-        data.audit_id,
-        data.note is not None,
-        current_user.username,
-    )
-    return attendance_service.record_manual_attendance(
-        db,
-        student_code=data.student_code,
-        session_id=data.session_id,
-        note=data.note,
-        audit_id=data.audit_id,
     )
 
 

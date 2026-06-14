@@ -40,11 +40,7 @@ from schema_sync import sync_schema
 from routes import alerts, attendance, auth, classrooms, course_sections, enrollments, faces, reports, sessions, students, subjects
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
-from services.attendance_service import (
-    CROSS_CLASS_REASON_CODE,
-    OFFICIAL_ATTENDANCE_BLOCK_MESSAGE,
-    cross_class_attendance_message,
-)
+from services.attendance_service import OFFICIAL_ATTENDANCE_BLOCK_MESSAGE
 from services.timezone_service import configured_timezone_name, resolved_timezone_name
 
 
@@ -170,7 +166,7 @@ def _session_membership_warning(student_data: dict | None, session: ClassSession
     if not student_data or not session:
         return None, None
     if student_data.get("class_name") != session.class_name:
-        return cross_class_attendance_message(student_data.get("class_name"), session.class_name), CROSS_CLASS_REASON_CODE
+        return "Sinh viên không thuộc lớp học phần này", "not_enrolled"
     return None, None
 
 
@@ -303,12 +299,12 @@ def _recognize_uploaded_face_multi(
             "liveness_passed": False,
             "score": None,
             "label": "error",
-            "message": f"Liveness check failed: {exc}",
+            "message": f"Không đạt kiểm tra khuôn mặt thật: {exc}",
         }
     liveness_score = liveness_result.get("score")
     if not liveness_result.get("liveness_passed", False):
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
-        message = liveness_result.get("message") or "Liveness check failed."
+        message = liveness_result.get("message") or "Phát hiện giả mạo khuôn mặt"
         audit_id = None
         if audit_recognition:
             db = SessionLocal()
@@ -343,7 +339,6 @@ def _recognize_uploaded_face_multi(
             "official_attendance_warning": message,
             "official_attendance_warning_code": "spoof",
             "recognized": False,
-            "requires_manual_confirmation": False,
             "reason": "spoof",
             "session_id": session_id,
             "processing_time_ms": processing_time_ms,
@@ -474,14 +469,14 @@ def _recognize_uploaded_face_multi(
                 official_warning, official_warning_code = _session_membership_warning(student_data, session)
             message = {
                 "success": "Nhận diện khuôn mặt thành công.",
-                "uncertain": "Đã phát hiện khuôn mặt nhưng chưa đủ độ tin cậy. Vui lòng xác nhận thủ công.",
+                "uncertain": "Đã phát hiện khuôn mặt nhưng chưa đủ độ tin cậy để điểm danh.",
                 "unknown": "Đã phát hiện khuôn mặt nhưng không nhận diện được sinh viên.",
             }[recognition_status]
             if official_warning:
                 message = official_warning
             audit_id = None
             if audit_recognition:
-                audit_status = CROSS_CLASS_REASON_CODE if official_warning_code == CROSS_CLASS_REASON_CODE else recognition_status
+                audit_status = official_warning_code if official_warning_code else recognition_status
                 attempt = _audit_recognition_safely(
                     db,
                     session_id=session_id,
@@ -513,7 +508,6 @@ def _recognize_uploaded_face_multi(
                     "official_attendance_warning": official_warning,
                     "official_attendance_warning_code": official_warning_code,
                     "recognized": student_data is not None and recognition_status in {"success", "uncertain"},
-                    "requires_manual_confirmation": official_warning_code == CROSS_CLASS_REASON_CODE,
                     "reason": official_warning_code,
                     "session_id": session_id,
                     "audit_id": audit_id,

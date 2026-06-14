@@ -159,8 +159,8 @@ export default function FaceRegister() {
     } catch(e) {
       if (e.response && e.response.status === 403) {
         const detail = e.response.data?.detail
-        if (detail && typeof detail === 'object' && (detail.message === 'Xác minh liveness thất bại' || detail.liveness_label)) {
-          let errText = 'Ảnh đăng ký không đạt xác minh liveness. Vui lòng chụp lại bằng khuôn mặt thật.'
+        if (detail && typeof detail === 'object' && (detail.liveness_score !== undefined || detail.liveness_label)) {
+          let errText = 'Ảnh đăng ký không đạt kiểm tra khuôn mặt thật. Vui lòng sử dụng khuôn mặt thật để điểm danh.'
           let info = []
           if (detail.filename) {
             const match = detail.filename.match(/sample-(\d+)/)
@@ -168,10 +168,16 @@ export default function FaceRegister() {
             info.push(`Ảnh: ${sampleName}`)
           }
           if (detail.liveness_score !== undefined && detail.liveness_score !== null) {
-            info.push(`Liveness: ${(detail.liveness_score * 100).toFixed(0)}%`)
+            info.push(`Điểm kiểm tra khuôn mặt thật: ${(detail.liveness_score * 100).toFixed(0)}%`)
           }
           if (detail.liveness_label) {
-            info.push(`Nhãn: ${detail.liveness_label}`)
+            const label = String(detail.liveness_label).toLowerCase()
+            const displayLabel = label === 'real' || label === 'real face'
+              ? 'Khuôn mặt thật'
+              : label === 'fake' || label === 'fake face' || label === 'spoof'
+                ? 'Khuôn mặt giả mạo'
+                : detail.liveness_label
+            info.push(`Nhãn: ${displayLabel}`)
           }
           if (info.length > 0) {
             errText += ` (${info.join(' · ')})`

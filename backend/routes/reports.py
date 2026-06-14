@@ -66,7 +66,6 @@ MODEL_TEST_LOG_CSV = EVALUATION_REPORTS_DIR / "model_test_log.csv"
 STATUS_LABELS = {
     "present": "Có mặt",
     "late": "Đi trễ",
-    "manual": "Thủ công",
     "absent": "Vắng mặt",
 }
 SUMMARY_COLUMNS = {
@@ -75,7 +74,6 @@ SUMMARY_COLUMNS = {
     "class_name": "Lớp",
     "present": "Có mặt",
     "late": "Đi trễ",
-    "manual": "Thủ công",
     "absent": "Vắng mặt",
     "attended": "Tổng có mặt",
     "total_sessions": "Tổng buổi",
@@ -597,7 +595,7 @@ def export_session_pdf(session_id: int, current_user=Depends(get_current_user), 
     c.setLineWidth(0.3)
     c.line(MARGIN, y + 10, PAGE_W - MARGIN, y + 10)
 
-    present_count = sum(1 for row in rows if row["status"] in ("present", "late", "manual"))
+    present_count = sum(1 for row in rows if row["status"] in ("present", "late", "left_early"))
     absent_count = sum(1 for row in rows if row["status"] == "absent")
 
     for item in rows:

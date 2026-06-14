@@ -11,7 +11,6 @@ export const recognitionStatusLabels = {
 export const attendanceStatusLabels = {
   present: 'Có mặt',
   late: 'Đi trễ',
-  manual: 'Thủ công',
   absent: 'Vắng mặt',
 }
 

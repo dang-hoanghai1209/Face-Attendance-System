@@ -14,6 +14,7 @@ from starlette.datastructures import UploadFile
 import face_service
 import main
 from database import Base, SessionLocal, engine
+from models.attendance import Attendance
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
@@ -109,7 +110,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 404)
         self.assertEqual(ctx.exception.detail, "Chưa có dữ liệu khuôn mặt đã đăng ký.")
 
-    def test_recognize_cross_class_returns_manual_confirmation_reason(self):
+    def test_recognize_cross_class_returns_not_enrolled_without_manual_confirmation(self):
         session = ClassSession(
             subject="Database",
             class_name="64CNTT",
@@ -133,15 +134,15 @@ class RecognitionEndpointTests(unittest.TestCase):
 
         self.assertFalse(result["official_attendance_allowed"])
         self.assertTrue(result["recognized"])
-        self.assertTrue(result["requires_manual_confirmation"])
-        self.assertEqual(result["reason"], "class_mismatch")
+        self.assertNotIn("requires_manual_confirmation", result)
+        self.assertEqual(result["reason"], "not_enrolled")
         self.assertEqual(result["session_id"], session.id)
         self.assertIsNotNone(result["audit_id"])
         audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
-        self.assertEqual(audit.status, "class_mismatch")
-        self.assertIn("Sinh viên thuộc lớp 63LFW, khác lớp chính của buổi học 64CNTT", result["message"])
+        self.assertEqual(audit.status, "not_enrolled")
+        self.assertEqual(result["message"], "Sinh viên không thuộc lớp học phần này")
 
-    def test_cross_class_recognize_audit_can_be_manually_confirmed_and_reported(self):
+    def test_cross_class_recognize_audit_does_not_create_attendance(self):
         session = ClassSession(
             subject="Software Testing",
             class_name="64CNTT",
@@ -162,19 +163,13 @@ class RecognitionEndpointTests(unittest.TestCase):
         main.match_embedding = lambda *_args, **_kwargs: ("success", "63123456", 0.91)
 
         recognition = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
-        response = attendance_service.record_manual_attendance(
-            self.db,
-            "63123456",
-            session.id,
-            audit_id=recognition["audit_id"],
-        )
         _session, rows = report_service.build_session_report(session.id, self.db)
         by_code = {row["student_code"]: row for row in rows}
 
-        self.assertEqual(recognition["reason"], "class_mismatch")
+        self.assertEqual(recognition["reason"], "not_enrolled")
         self.assertIsNotNone(recognition["audit_id"])
-        self.assertEqual(response["status"], "success")
-        self.assertEqual(by_code["63123456"]["status"], "manual")
+        self.assertNotIn("63123456", by_code)
+        self.assertEqual(self.db.query(Attendance).count(), 0)
 
     def test_recognize_no_face_returns_empty_results(self):
         session = self.add_session()
@@ -221,7 +216,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
 
         self.assertEqual(result["status"], "spoof")
-        self.assertEqual(result["message"], "Liveness model is not available.")
+        self.assertEqual(result["message"], "Không đạt kiểm tra khuôn mặt thật")
         self.assertIsNone(result["liveness_score"])
         self.assertEqual(result["confidence"], -1.0)
         self.assertEqual(result["results"], [])

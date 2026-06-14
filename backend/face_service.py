@@ -111,7 +111,7 @@ def check_liveness(image_bytes: bytes) -> dict:
         "label": "unavailable",
         "model": LIVENESS_MODEL,
         "threshold": LIVENESS_THRESHOLD,
-        "message": "Liveness model is not available.",
+        "message": "Không đạt kiểm tra khuôn mặt thật",
     }
 
 

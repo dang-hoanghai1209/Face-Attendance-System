@@ -8,7 +8,7 @@ export default function WarningTable({ warnings }) {
         <table className="data-table">
           <thead>
             <tr>
-              {['Mã SV','Họ tên','Đúng giờ','Trễ','Thủ công','Vắng','Tỷ lệ'].map(h => (
+              {['Mã SV','Họ tên','Đúng giờ','Trễ','Vắng','Tỷ lệ'].map(h => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
@@ -20,7 +20,6 @@ export default function WarningTable({ warnings }) {
                 <td>{w.full_name}</td>
                 <td style={{color:'var(--teal)',fontFamily:'var(--mono)',fontSize:12}}>{w.present}</td>
                 <td style={{color:'var(--amber)',fontFamily:'var(--mono)',fontSize:12}}>{w.late}</td>
-                <td style={{color:'var(--blue)',fontFamily:'var(--mono)',fontSize:12}}>{w.manual}</td>
                 <td style={{color:'var(--red)',fontFamily:'var(--mono)',fontSize:12}}>{w.absent}</td>
                 <td>
                   <span className="badge danger">{(w.rate*100).toFixed(1)}%</span>
@@ -44,9 +43,9 @@ export default function WarningTable({ warnings }) {
               <span className="mobile-card-value">{w.full_name}</span>
             </div>
             <div className="mobile-card-row">
-              <span className="mobile-card-label">Đúng giờ / Trễ / Thủ công:</span>
+              <span className="mobile-card-label">Đúng giờ / Trễ:</span>
               <span className="mobile-card-value">
-                <span style={{color:'var(--teal)'}}>{w.present}</span> / <span style={{color:'var(--amber)'}}>{w.late}</span> / <span style={{color:'var(--blue)'}}>{w.manual}</span>
+                <span style={{color:'var(--teal)'}}>{w.present}</span> / <span style={{color:'var(--amber)'}}>{w.late}</span>
               </span>
             </div>
             <div className="mobile-card-row">

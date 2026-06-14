@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from database import Base
 
 
-ATTENDANCE_STATUSES = {"present", "late", "manual", "left_early"}
+ATTENDANCE_STATUSES = {"present", "late", "left_early"}
 
 
 class Attendance(Base):

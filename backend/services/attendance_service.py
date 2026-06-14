@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from models.attendance import Attendance
 from models.attendance_scan import AttendanceScan
 from models.enrollment import Enrollment
-from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.student import Student
 from face_service import THRESHOLD_UNCERTAIN
@@ -17,32 +16,15 @@ from services.security_alert_service import create_alert
 from services.timezone_service import now_in_app_timezone
 
 
-EARLY_CHECKIN_MINUTES = 5
+EARLY_CHECKIN_MINUTES = 15
 PRESENT_WINDOW_MINUTES = 1
 LATE_THRESHOLD_MINUTES = 10
 MIN_SESSION_ENROLLMENTS = 5
 MIN_SESSION_ENROLLMENTS_MESSAGE = "Buổi học cần tối thiểu 5 sinh viên đã được đăng ký"
-ATTENDED_STATUSES = {"present", "late", "manual", "left_early"}
+ATTENDED_STATUSES = {"present", "late", "left_early"}
 OFFICIAL_ATTENDANCE_BLOCK_MESSAGE = (
     "Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức."
 )
-
-
-CROSS_CLASS_LEGACY_CODE = "cross_class_requires_manual_confirmation"
-CROSS_CLASS_REASON_CODE = "class_mismatch"
-MANUAL_CONFIRMABLE_AUDIT_STATUSES = {
-    CROSS_CLASS_REASON_CODE,
-    CROSS_CLASS_LEGACY_CODE,
-    "success",
-    "uncertain",
-}
-
-
-def cross_class_attendance_message(student_class: str, session_class: str):
-    return (
-        f"Sinh viên thuộc lớp {student_class}, khác lớp chính của buổi học {session_class}. "
-        "Vui lòng xác nhận thủ công nếu sinh viên có đăng ký/học ghép buổi này."
-    )
 
 
 def is_official_attendance_student(student: Student):
@@ -66,6 +48,8 @@ def attendance_error(status_code: int, code: str, message: str, **extra):
         status_code=status_code,
         detail={
             "status": code,
+            "success": False,
+            "reason": code,
             "message": message,
             **extra,
         },
@@ -144,6 +128,8 @@ def _is_legacy_enrolled_or_class_match(db: Session, student: Student, session: C
 def _security_alert_response(status: str, message: str, alert):
     return {
         "status": status,
+        "success": False,
+        "reason": status,
         "message": message,
         "alert_id": alert.id,
         "alert_type": alert.alert_type,
@@ -171,19 +157,15 @@ def get_student_and_session(db: Session, student_code: str, session_id: int):
             attendance_error(
                 403,
                 "not_enrolled",
-                "Bạn không có trong danh sách đăng ký của lớp học phần này.",
+                "Sinh viên không thuộc lớp học phần này",
             )
     elif student.class_name != session.class_name:
-        # TODO: Sau này nên kiểm tra bằng danh sách đăng ký môn học/session_students thay vì so sánh class_name.
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason": "class_mismatch",
-                "code": CROSS_CLASS_LEGACY_CODE,
-                "message": cross_class_attendance_message(student.class_name, session.class_name),
-                "student_class": student.class_name,
-                "session_class": session.class_name,
-            },
+        attendance_error(
+            403,
+            "not_enrolled",
+            "Sinh viên không thuộc lớp học phần này",
+            student_class=student.class_name,
+            session_class=session.class_name,
         )
 
     block_reason = official_attendance_block_reason(student)
@@ -192,69 +174,6 @@ def get_student_and_session(db: Session, student_code: str, session_id: int):
 
     return student, session
 
-
-def validate_cross_class_manual_audit(db: Session, student: Student, session: ClassSession, audit_id: int | None):
-    if not audit_id:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason": "missing_recognition_audit",
-                "message": "Thiếu audit_id để xác nhận thủ công cho trường hợp sinh viên khác lớp.",
-            },
-        )
-
-    attempt = db.query(RecognitionAttempt).filter(RecognitionAttempt.id == audit_id).first()
-    if not attempt:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "reason": "recognition_audit_not_found",
-                "message": "Không tìm thấy bản ghi kiểm tra nhận diện.",
-            },
-        )
-
-    if attempt.session_id != session.id:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason": "audit_session_mismatch",
-                "message": "Bản ghi nhận diện không thuộc buổi học hiện tại.",
-            },
-        )
-
-    audit_student_matches = (
-        attempt.predicted_student_id == student.id
-        or attempt.predicted_student_code == student.student_code
-    )
-    if not audit_student_matches:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason": "audit_student_mismatch",
-                "message": "Bản ghi nhận diện không khớp với sinh viên cần xác nhận.",
-            },
-        )
-
-    if attempt.status not in MANUAL_CONFIRMABLE_AUDIT_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason": "invalid_recognition_audit",
-                "message": "Trạng thái bản ghi nhận diện không hợp lệ để xác nhận thủ công sinh viên khác lớp.",
-                "audit_status": attempt.status,
-            },
-        )
-
-    if attempt.confidence is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "reason": "missing_audit_confidence",
-                "message": "Bản ghi nhận diện thiếu điểm tin cậy.",
-            },
-        )
-
-    return attempt
 
 def calculate_attendance_status(session: ClassSession, check_in_at: datetime):
     if not session.start_time:
@@ -276,10 +195,10 @@ def validate_checkin_window(session: ClassSession, check_in_at: datetime):
         attendance_error(
             400,
             "not_started",
-            "Buổi học chưa bắt đầu. Vui lòng quay lại khi đến giờ học.",
+            "Lớp học chưa bắt đầu điểm danh",
         )
     if check_in_at > attendance_deadline:
-        attendance_error(403, "attendance_closed", "Đã quá thời gian điểm danh.")
+        attendance_error(403, "expired", "Lớp học đã kết thúc điểm danh")
 
 
 def validate_min_session_enrollments(db: Session, session: ClassSession):
@@ -317,7 +236,7 @@ def validate_gps(db: Session, session: ClassSession, gps_lat=None, gps_lng=None,
         attendance_error(
             403,
             "gps_out_of_range",
-            "Ngoài phạm vi lớp học",
+            "Ngoài phạm vi điểm danh",
             distance_meters=round(distance_meters, 2),
             allowed_radius_meters=allowed_radius_meters,
         )
@@ -357,6 +276,8 @@ def flatten_checkin_response(status: str, message: str, record: Attendance, stud
     data = serialize_record(record, student)
     return {
         "status": status,
+        "success": status == "success",
+        "reason": None if status == "success" else status,
         "message": message,
         "student_code": student.student_code,
         "full_name": student.full_name,
@@ -455,7 +376,7 @@ def record_checkin(
         )
         return _security_alert_response(
             "spoof",
-            "Xác minh liveness thất bại.",
+            "Phát hiện giả mạo khuôn mặt",
             alert,
         )
 
@@ -475,7 +396,7 @@ def record_checkin(
         )
         return _security_alert_response(
             "unknown",
-            "Không nhận diện được sinh viên.",
+            "Không nhận diện được khuôn mặt",
             alert,
         )
 
@@ -508,7 +429,7 @@ def record_checkin(
         )
         return _security_alert_response(
             "not_enrolled",
-            "Buổi học chưa có danh sách đăng ký sinh viên",
+            "Sinh viên không thuộc lớp học phần này",
             alert,
         )
 
@@ -528,7 +449,7 @@ def record_checkin(
         )
         return _security_alert_response(
             "not_enrolled",
-            "Sinh viên chưa được đăng ký cho buổi học này.",
+            "Sinh viên không thuộc lớp học phần này",
             alert,
         )
 
@@ -537,7 +458,7 @@ def record_checkin(
         validate_checkin_window(session, check_in_at)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        if session_enrollment_count > 0 and detail.get("status") in {"not_started", "attendance_closed"}:
+        if session_enrollment_count > 0 and detail.get("status") in {"not_started", "expired", "attendance_closed"}:
             alert = create_alert(
                 db,
                 session_id=session_id,
@@ -551,8 +472,8 @@ def record_checkin(
                 note=detail.get("message"),
             )
             return _security_alert_response(
-                "late_entry",
-                detail.get("message") or "Ngoài cửa sổ điểm danh.",
+                detail.get("status") or "expired",
+                detail.get("message") or "Lớp học đã kết thúc điểm danh",
                 alert,
             )
         raise
@@ -568,7 +489,7 @@ def record_checkin(
             existing.status = calculate_attendance_status(session, existing.check_in_at or check_in_at)
             scan_note = "restored_attendance"
         else:
-            scan_note = "manual_unchanged"
+            scan_note = "unchanged"
 
         create_attendance_scan(
             db,
@@ -649,6 +570,8 @@ def record_checkout(db: Session, student_code: str, session_id: int, confidence=
     if existing.check_out_at:
         return {
             "status": "success",
+            "success": True,
+            "reason": None,
             "message": f"{student.full_name} đã được ghi nhận ra về cho buổi học này.",
             "data": serialize_record(existing, student),
         }
@@ -660,65 +583,10 @@ def record_checkout(db: Session, student_code: str, session_id: int, confidence=
 
     return {
         "status": "success",
+        "success": True,
+        "reason": None,
         "message": f"Đã ghi nhận ra về cho {student.full_name}.",
         "data": serialize_record(existing, student),
-    }
-
-
-def _update_manual_record(db: Session, record: Attendance, student: Student, note=None, confidence=None):
-    record.status = "manual"
-    record.note = note
-    if confidence is not None and record.check_in_conf is None:
-        record.check_in_conf = confidence
-    db.commit()
-    db.refresh(record)
-    return {
-        "status": "success",
-        "message": f"Đã cập nhật điểm danh thủ công cho {student.full_name}.",
-        "data": serialize_record(record, student),
-    }
-
-
-def record_manual_attendance(db: Session, student_code: str, session_id: int, note=None, audit_id: int | None = None):
-    student, session = _get_student_and_session_base(db, student_code, session_id)
-
-    block_reason = official_attendance_block_reason(student)
-    if block_reason:
-        raise HTTPException(status_code=403, detail=block_reason)
-
-    recognition_confidence = None
-    if student.class_name != session.class_name:
-        attempt = validate_cross_class_manual_audit(db, student, session, audit_id)
-        recognition_confidence = attempt.confidence
-
-    existing = get_session_record(db, student.id, session_id)
-
-    if existing:
-        return _update_manual_record(db, existing, student, note, recognition_confidence)
-
-    record = Attendance(
-        student_id=student.id,
-        session_id=session_id,
-        check_in_at=now_in_app_timezone(),
-        check_in_conf=recognition_confidence,
-        status="manual",
-        note=note,
-    )
-    db.add(record)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        existing = get_session_record(db, student.id, session_id)
-        if existing:
-            return _update_manual_record(db, existing, student, note, recognition_confidence)
-        raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
-    db.refresh(record)
-
-    return {
-        "status": "success",
-        "message": f"Đã ghi nhận điểm danh thủ công cho {student.full_name}.",
-        "data": serialize_record(record, student),
     }
 
 

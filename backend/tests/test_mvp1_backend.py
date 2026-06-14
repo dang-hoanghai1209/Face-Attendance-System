@@ -16,7 +16,6 @@ from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
 from models.user import User
-from routes import attendance as attendance_routes
 from routes.auth import LoginRequest, get_me, login
 from routes.classrooms import ClassroomCreate, create_classroom
 from routes.attendance import AttendanceCheckIn, _checkin_response
@@ -126,11 +125,11 @@ class BackendMVP1Tests(unittest.TestCase):
         )
         with self.assertRaises(Exception) as ctx:
             attendance_service.validate_checkin_window(session, datetime(2026, 6, 10, 7, 11))
-        self.assertEqual(ctx.exception.detail["status"], "attendance_closed")
+        self.assertEqual(ctx.exception.detail["status"], "expired")
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(
             ctx.exception.detail["message"],
-            "Đã quá thời gian điểm danh.",
+            "Lớp học đã kết thúc điểm danh",
         )
 
     def test_enrollment_and_report_use_section_membership(self):
@@ -225,14 +224,8 @@ class BackendMVP1Tests(unittest.TestCase):
         self.assertEqual(me_response["full_name"], student.full_name)
         self.assertEqual(me_response["role"], "student")
 
-    def test_student_cannot_call_manual_attendance(self):
-        user = self.add_user(username="64100001", role="student", full_name="Nguyen Van A")
-
-        with self.assertRaises(Exception) as ctx:
-            attendance_routes.require_manual_attendance_editor(current_user=user)
-
-        self.assertEqual(ctx.exception.status_code, 403)
-        self.assertEqual(ctx.exception.detail, "Bạn không có quyền xác nhận điểm danh thủ công.")
+    def test_manual_attendance_route_is_removed(self):
+        self.assertFalse(hasattr(attendance_service, "record_manual_attendance"))
 
     def test_active_sessions_uses_logged_in_student_identity(self):
         classroom, _subject, section = self.add_section_bundle()
@@ -312,8 +305,8 @@ class BackendMVP1Tests(unittest.TestCase):
             start_time=time(7, 0),
             end_time=time(9, 0),
         )
-        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 54))[0], "not_started")
-        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 55))[0], "open_for_attendance")
+        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 44))[0], "not_started")
+        self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 6, 45))[0], "open_for_attendance")
         self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 7, 10))[0], "open_for_attendance")
         self.assertEqual(_mobile_session_status(session, datetime(2026, 6, 10, 7, 11))[0], "closed")
 
@@ -402,7 +395,7 @@ class BackendMVP1Tests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(payload["status"], "gps_out_of_range")
-        self.assertEqual(payload["message"], "Ngoài phạm vi lớp học")
+        self.assertEqual(payload["message"], "Ngoài phạm vi điểm danh")
         self.assertIn("distance_meters", payload)
         self.assertEqual(payload["allowed_radius_meters"], classroom.radius_meters)
 

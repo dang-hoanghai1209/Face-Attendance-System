@@ -80,7 +80,7 @@ const getAlertCardStyle = (type) => {
       color: '#fda4af',
       badgeBg: 'rgba(244,63,94,0.15)',
       badgeColor: '#fb7185',
-      label: type === 'SPOOF' ? 'Giả mạo (Spoof)' : 'Khuôn mặt lạ (Unknown)'
+      label: type === 'SPOOF' ? 'Giả mạo khuôn mặt' : 'Khuôn mặt lạ'
     }
   }
   if (type === 'NOT_ENROLLED') {
@@ -1649,7 +1649,7 @@ export default function Sessions() {
                               <span>Độ tin cậy: {(al.confidence * 100).toFixed(0)}%</span>
                             )}
                             {al.liveness_score !== null && al.liveness_score !== undefined && (
-                              <span>Liveness: {(al.liveness_score * 100).toFixed(0)}%</span>
+                              <span>Điểm kiểm tra khuôn mặt thật: {(al.liveness_score * 100).toFixed(0)}%</span>
                             )}
                             {al.gps_lat !== null && al.gps_lat !== undefined && (
                               <span>GPS: {al.gps_lat.toFixed(4)}, {al.gps_lng.toFixed(4)}</span>

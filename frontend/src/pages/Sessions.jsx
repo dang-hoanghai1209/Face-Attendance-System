@@ -90,7 +90,7 @@ const getAlertCardStyle = (type) => {
       color: '#ffedd5',
       badgeBg: 'rgba(249,115,22,0.15)',
       badgeColor: '#f97316',
-      label: 'Chưa đăng ký môn học'
+      label: 'Sinh viên không thuộc danh sách lớp học phần'
     }
   }
   if (type === 'LATE_ENTRY') {

@@ -140,7 +140,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertIsNotNone(result["audit_id"])
         audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
         self.assertEqual(audit.status, "not_enrolled")
-        self.assertEqual(result["message"], "Sinh viên không thuộc lớp học phần này")
+        self.assertEqual(result["message"], "Sinh viên không thuộc danh sách lớp học phần này")
 
     def test_cross_class_recognize_audit_does_not_create_attendance(self):
         session = ClassSession(

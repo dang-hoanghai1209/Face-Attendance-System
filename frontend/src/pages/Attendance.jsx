@@ -37,6 +37,7 @@ const isOfficialStudent = (student) =>
 
 const getStyle = (status) => {
   if (status === 'success')   return { bg: 'rgba(0,201,167,.14)', border: 'rgba(0,201,167,.45)', accent: '#2dd4bf', text: '#f8fafc', muted: '#99f6e4', label: 'Điểm danh thành công' }
+  if (status === 'not_enrolled') return { bg: 'rgba(249,115,22,.14)', border: 'rgba(249,115,22,.45)', accent: '#fb923c', text: '#f8fafc', muted: '#fed7aa', label: 'Cảnh báo điểm danh' }
   if (status === 'uncertain' || status === 'blocked') return { bg: 'rgba(245,158,11,.14)', border: 'rgba(245,158,11,.45)', accent: '#fbbf24', text: '#f8fafc', muted: '#fde68a', label: 'Điểm danh thất bại' }
   return                             { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Điểm danh thất bại' }
 }
@@ -68,7 +69,7 @@ const formatConf = (v) =>
   typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '-'
 
 const attendanceFailureReasons = {
-  not_enrolled: 'Sinh viên không thuộc lớp học phần này',
+  not_enrolled: 'Sinh viên không thuộc danh sách lớp học phần này',
   not_started: 'Lớp học chưa bắt đầu điểm danh',
   early: 'Lớp học chưa bắt đầu điểm danh',
   expired: 'Lớp học đã kết thúc điểm danh',
@@ -81,11 +82,21 @@ const attendanceFailureReasons = {
   insufficient_enrollments: 'Buổi học chưa đủ tối thiểu 5 sinh viên đăng ký.',
 }
 
+const notEnrolledAlertMessage = 'Sinh viên không thuộc danh sách lớp học phần này'
+
+const isNotEnrolledAlert = (status, alertType) =>
+  (status || '').toLowerCase() === 'not_enrolled' ||
+  (alertType || '').toUpperCase() === 'NOT_ENROLLED'
+
 const buildFailureMessage = (status, fallback) => {
   const normalized = (status || '').toLowerCase()
+  if (normalized === 'not_enrolled') return notEnrolledAlertMessage
   const reason = attendanceFailureReasons[normalized] || fallback || 'Không thể điểm danh'
   return reason.startsWith('Điểm danh thất bại') ? reason : `Điểm danh thất bại: ${reason}`
 }
+
+const buildNotEnrolledResultMessage = () =>
+  notEnrolledAlertMessage
 
 export default function Attendance() {
   const { user } = useAuth()
@@ -550,7 +561,8 @@ export default function Attendance() {
     const checkinStatus = (checkinData.status || '').toLowerCase()
     
     if (['spoof', 'unknown', 'unknown_face', 'not_enrolled', 'late_entry', 'not_started', 'early', 'expired', 'attendance_closed', 'gps_out_of_range', 'insufficient_enrollments'].includes(checkinStatus)) {
-      const alertMsg = buildFailureMessage(checkinStatus, checkinData.message)
+      const isEnrollmentAlert = isNotEnrolledAlert(checkinStatus, checkinData.alert_type)
+      const alertMsg = isEnrollmentAlert ? buildNotEnrolledResultMessage() : buildFailureMessage(checkinStatus, checkinData.message)
       
       setAlertToast({
         type: checkinStatus,
@@ -562,6 +574,7 @@ export default function Attendance() {
       setResult({
         success: false,
         status: checkinStatus,
+        alertType: checkinData.alert_type,
         studentCode: recognizedCode || 'Không xác định',
         student: recognizedStudent,
         confidence,
@@ -582,18 +595,21 @@ export default function Attendance() {
     
     if (status && ['spoof', 'unknown', 'unknown_face', 'not_enrolled', 'late_entry', 'not_started', 'early', 'expired', 'attendance_closed', 'gps_out_of_range', 'insufficient_enrollments'].includes(status.toLowerCase())) {
       const mappedStatus = status.toLowerCase()
-      const alertMsg = buildFailureMessage(mappedStatus, msg)
+      const responseAlertType = responseData?.alert_type || responseData?.detail?.alert_type
+      const isEnrollmentAlert = isNotEnrolledAlert(mappedStatus, responseAlertType)
+      const alertMsg = isEnrollmentAlert ? buildNotEnrolledResultMessage() : buildFailureMessage(mappedStatus, msg)
       
       setAlertToast({
         type: mappedStatus,
         message: alertMsg,
         alertId: responseData?.alert_id || responseData?.detail?.alert_id,
-        alertType: responseData?.alert_type || responseData?.detail?.alert_type,
+        alertType: responseAlertType,
       })
       
       setResult({
         success: false,
         status: mappedStatus,
+        alertType: responseAlertType,
         studentCode: recognizedCode || 'Không xác định',
         student: recognizedStudent,
         confidence,
@@ -613,7 +629,7 @@ export default function Attendance() {
     let bgColor = 'rgba(239, 68, 68, 0.95)'
     let borderColor = 'rgba(239, 68, 68, 0.4)'
     let icon = '🚨'
-    let title = 'CẢNH BÁO BẢO MẬT'
+    let title = 'ĐIỂM DANH THẤT BẠI'
 
     const typeLower = (alertToast.type || '').toLowerCase()
     if (typeLower === 'spoof') {
@@ -630,7 +646,7 @@ export default function Attendance() {
       bgColor = 'rgba(249, 115, 22, 0.95)'
       borderColor = 'rgba(249, 115, 22, 0.4)'
       icon = '⚠️'
-      title = 'CHƯA ĐĂNG KÝ BUỔI HỌC'
+      title = 'CẢNH BÁO ĐIỂM DANH'
     } else if (typeLower === 'late_entry') {
       bgColor = 'rgba(234, 179, 8, 0.95)'
       borderColor = 'rgba(234, 179, 8, 0.4)'
@@ -833,12 +849,17 @@ export default function Attendance() {
 
         if (recognizedCode && official_attendance_allowed === false && blockMessage) {
           const failureStatus = official_attendance_warning_code || reason || 'blocked'
+          const shouldLetCheckinCreateAlert = failureStatus === 'not_enrolled'
+          if (shouldLetCheckinCreateAlert) {
+            // Continue to check-in so backend records the NOT_ENROLLED security alert.
+          } else {
           const failureMessage = buildFailureMessage(failureStatus, blockMessage)
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
             confidence, livenessScore: finalLivenessScore, message: failureMessage })
           setMessage(failureMessage)
           if (window.innerWidth < 768) setMobileStep(4)
           return
+          }
         }
 
         if ((status === 'success' || status === 'uncertain') && recognizedCode) {
@@ -1260,6 +1281,8 @@ export default function Attendance() {
                   <div><strong>Mã SV:</strong> {result.studentCode}</div>
                   {result.student?.full_name && <div><strong>Tên SV:</strong> {result.student.full_name}</div>}
                   {result.student?.class_name && <div><strong>Lớp:</strong> {result.student.class_name}</div>}
+                  <div><strong>Lớp học phần:</strong> {selectedSession?.section_code || selectedSession?.class_name || '-'}</div>
+                  <div><strong>Buổi học:</strong> {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</div>
                   <div><strong>Độ tương đồng:</strong> {formatConf(result.confidence)}</div>
                   {result.livenessScore !== undefined && (
                     <div>
@@ -1273,6 +1296,12 @@ export default function Attendance() {
               <p style={{ fontSize: '13px', color: style.muted, margin: '8px 0 0 0' }}>
                 {result?.message || message}
               </p>
+              {isNotEnrolledAlert(result?.status, result?.alertType) && (
+                <div style={{ fontSize: '13px', color: style.muted, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <span>Không ghi nhận điểm danh</span>
+                  <span>Cảnh báo đã được lưu trong Quản lý buổi học</span>
+                </div>
+              )}
 
               <button
                 style={{ marginTop: '14px', minHeight: 48, width: '100%', justifyContent: 'center' }}
@@ -1454,7 +1483,8 @@ export default function Attendance() {
                     <p>Tên sinh viên: {result.student?.full_name || '-'}</p>
                     <p>Mã SV: {result.studentCode}</p>
                     <p>Lớp: {result.student?.class_name || '-'}</p>
-                    <p>Lớp chính của buổi học: {selectedSession?.class_name || selectedSession?.section_code || '-'}</p>
+                    <p>Lớp học phần: {selectedSession?.section_code || selectedSession?.class_name || '-'}</p>
+                    <p>Buổi học đang điểm danh: {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</p>
                     <p>Độ tin cậy: {formatConf(result.confidence)}</p>
                     {result.livenessScore !== undefined && (
                       <p>Điểm kiểm tra khuôn mặt thật: {result.livenessScore !== null ? `${(result.livenessScore * 100).toFixed(0)}%` : 'Không bật'}</p>
@@ -1465,6 +1495,12 @@ export default function Attendance() {
                     <p style={{ color: getStyle(result.status).muted }}>
                       {result.message}
                     </p>
+                    {isNotEnrolledAlert(result.status, result.alertType) && (
+                      <>
+                        <p style={{ color: getStyle(result.status).muted }}>Không ghi nhận điểm danh</p>
+                        <p style={{ color: getStyle(result.status).muted }}>Cảnh báo đã được lưu trong Quản lý buổi học</p>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

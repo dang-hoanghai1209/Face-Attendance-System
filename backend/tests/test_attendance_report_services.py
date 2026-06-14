@@ -71,7 +71,22 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
     def add_session_enrollments(self, session, students):
         for student in students:
-            self.db.add(Enrollment(session_id=session.id, student_id=student.id, status="active"))
+            if session.section_id:
+                exists = (
+                    self.db.query(Enrollment)
+                    .filter(Enrollment.course_section_id == session.section_id, Enrollment.student_id == student.id)
+                    .first()
+                )
+                if not exists:
+                    self.db.add(Enrollment(course_section_id=session.section_id, student_id=student.id, status="active"))
+            else:
+                exists = (
+                    self.db.query(Enrollment)
+                    .filter(Enrollment.session_id == session.id, Enrollment.student_id == student.id)
+                    .first()
+                )
+                if not exists:
+                    self.db.add(Enrollment(session_id=session.id, student_id=student.id, status="active"))
         self.db.commit()
 
     def add_min_session_enrollments(self, session, student, total=5):
@@ -380,7 +395,63 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "not_enrolled")
         self.assertEqual(response["alert_type"], "NOT_ENROLLED")
-        self.assertEqual(response["message"], "Sinh viên không thuộc lớp học phần này")
+        self.assertEqual(response["message"], "Sinh viên không thuộc danh sách lớp học phần này")
+
+    def test_section_session_rejects_same_class_student_without_section_enrollment(self):
+        student = self.add_student(class_name="64CNTT")
+        section, classroom, session = self.add_section_session()
+        other_students = [
+            self.add_student(student_code=f"6400000{index}", full_name=f"Section Student {index}", class_name="64CNTT")
+            for index in range(1, 6)
+        ]
+        self.add_session_enrollments(session, other_students)
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        response = attendance_service.record_checkin(
+            self.db,
+            student.student_code,
+            session.id,
+            gps_lat=classroom.gps_lat,
+            gps_lng=classroom.gps_lng,
+        )
+
+        self.assertEqual(section.id, session.section_id)
+        self.assertEqual(response["status"], "not_enrolled")
+        self.assertEqual(response["alert_type"], "NOT_ENROLLED")
+        self.assertEqual(response["message"], "Sinh viên không thuộc danh sách lớp học phần này")
+        self.assertEqual(self.db.query(Attendance).count(), 0)
+
+    def test_section_session_allows_different_class_student_with_section_enrollment(self):
+        student = self.add_student(class_name="63CNTT")
+        section, classroom, session = self.add_section_session()
+        self.add_min_session_enrollments(session, student)
+        self.patch_now(datetime(2026, 5, 30, 7, 35))
+
+        response = attendance_service.record_checkin(
+            self.db,
+            student.student_code,
+            session.id,
+            gps_lat=classroom.gps_lat,
+            gps_lng=classroom.gps_lng,
+        )
+
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(response["student_code"], student.student_code)
+        self.assertEqual(self.db.query(Attendance).count(), 1)
+
+    def test_session_report_excludes_attendance_outside_section_enrollment(self):
+        enrolled = self.add_student(student_code="64000001", full_name="Enrolled Student", class_name="64CNTT")
+        outsider = self.add_student(student_code="64000002", full_name="Outside Student", class_name="64CNTT")
+        _section, _classroom, session = self.add_section_session()
+        self.add_min_session_enrollments(session, enrolled)
+        self.db.add(Attendance(student_id=outsider.id, session_id=session.id, status="present"))
+        self.db.commit()
+
+        _session, rows = report_service.build_session_report(session.id, self.db)
+        by_code = {row["student_code"]: row for row in rows}
+
+        self.assertIn(enrolled.student_code, by_code)
+        self.assertNotIn(outsider.student_code, by_code)
 
     def test_section_session_saves_gps_when_valid(self):
         student = self.add_student()
@@ -628,7 +699,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         self.assertEqual(response["status"], "not_enrolled")
         self.assertEqual(response["alert_type"], "NOT_ENROLLED")
-        self.assertEqual(response["message"], "Sinh viên không thuộc lớp học phần này")
+        self.assertEqual(response["message"], "Sinh viên không thuộc danh sách lớp học phần này")
         self.assertEqual(self.db.query(Attendance).count(), 0)
 
 

@@ -168,7 +168,7 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
 
         alerts = self.alerts("NOT_ENROLLED")
         self.assertEqual(response["status"], "not_enrolled")
-        self.assertEqual(response["message"], "Sinh viên không thuộc lớp học phần này")
+        self.assertEqual(response["message"], "Sinh viên không thuộc danh sách lớp học phần này")
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].student_id, student.id)
         self.assertEqual(self.attendance_count(), 0)

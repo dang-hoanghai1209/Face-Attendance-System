@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 
 from fastapi import HTTPException
-from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -49,6 +48,7 @@ def attendance_error(status_code: int, code: str, message: str, **extra):
         detail={
             "status": code,
             "success": False,
+            "recorded": False,
             "reason": code,
             "message": message,
             **extra,
@@ -81,36 +81,6 @@ def get_session_or_404(db: Session, session_id: int):
 
 
 def _is_student_enrolled_in_session(db: Session, student: Student, session: ClassSession):
-    filters = [
-        (Enrollment.session_id == session.id) & (Enrollment.student_id == student.id)
-    ]
-    if session.section_id:
-        filters.append(
-            (Enrollment.course_section_id == session.section_id) & (Enrollment.student_id == student.id) & (Enrollment.status == "active")
-        )
-    return (
-        db.query(Enrollment)
-        .filter(or_(*filters))
-        .first()
-        is not None
-    )
-
-
-def count_session_enrollments(db: Session, session: ClassSession):
-    filters = [Enrollment.session_id == session.id]
-    if session.section_id:
-        filters.append(
-            (Enrollment.course_section_id == session.section_id) & (Enrollment.status == "active")
-        )
-    return (
-        db.query(Enrollment.student_id)
-        .filter(or_(*filters))
-        .distinct()
-        .count()
-    )
-
-
-def _is_legacy_enrolled_or_class_match(db: Session, student: Student, session: ClassSession):
     if session.section_id:
         return (
             db.query(Enrollment)
@@ -122,13 +92,37 @@ def _is_legacy_enrolled_or_class_match(db: Session, student: Student, session: C
             .first()
             is not None
         )
-    return student.class_name == session.class_name
+
+    return (
+        db.query(Enrollment)
+        .filter(Enrollment.session_id == session.id, Enrollment.student_id == student.id)
+        .first()
+        is not None
+    )
+
+
+def count_session_enrollments(db: Session, session: ClassSession):
+    if session.section_id:
+        return (
+            db.query(Enrollment.student_id)
+            .filter(Enrollment.course_section_id == session.section_id, Enrollment.status == "active")
+            .distinct()
+            .count()
+        )
+
+    return (
+        db.query(Enrollment.student_id)
+        .filter(Enrollment.session_id == session.id)
+        .distinct()
+        .count()
+    )
 
 
 def _security_alert_response(status: str, message: str, alert):
     return {
         "status": status,
         "success": False,
+        "recorded": False,
         "reason": status,
         "message": message,
         "alert_id": alert.id,
@@ -157,13 +151,13 @@ def get_student_and_session(db: Session, student_code: str, session_id: int):
             attendance_error(
                 403,
                 "not_enrolled",
-                "Sinh viên không thuộc lớp học phần này",
+                "Sinh viên không thuộc danh sách lớp học phần này",
             )
     elif student.class_name != session.class_name:
         attendance_error(
             403,
             "not_enrolled",
-            "Sinh viên không thuộc lớp học phần này",
+            "Sinh viên không thuộc danh sách lớp học phần này",
             student_class=student.class_name,
             session_class=session.class_name,
         )
@@ -277,6 +271,7 @@ def flatten_checkin_response(status: str, message: str, record: Attendance, stud
     return {
         "status": status,
         "success": status == "success",
+        "recorded": status == "success",
         "reason": None if status == "success" else status,
         "message": message,
         "student_code": student.student_code,
@@ -429,7 +424,7 @@ def record_checkin(
         )
         return _security_alert_response(
             "not_enrolled",
-            "Sinh viên không thuộc lớp học phần này",
+            "Sinh viên không thuộc danh sách lớp học phần này",
             alert,
         )
 
@@ -449,7 +444,7 @@ def record_checkin(
         )
         return _security_alert_response(
             "not_enrolled",
-            "Sinh viên không thuộc lớp học phần này",
+            "Sinh viên không thuộc danh sách lớp học phần này",
             alert,
         )
 
@@ -571,6 +566,7 @@ def record_checkout(db: Session, student_code: str, session_id: int, confidence=
         return {
             "status": "success",
             "success": True,
+            "recorded": True,
             "reason": None,
             "message": f"{student.full_name} đã được ghi nhận ra về cho buổi học này.",
             "data": serialize_record(existing, student),
@@ -584,6 +580,7 @@ def record_checkout(db: Session, student_code: str, session_id: int, confidence=
     return {
         "status": "success",
         "success": True,
+        "recorded": True,
         "reason": None,
         "message": f"Đã ghi nhận ra về cho {student.full_name}.",
         "data": serialize_record(existing, student),

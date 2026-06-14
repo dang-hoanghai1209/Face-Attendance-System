@@ -141,42 +141,6 @@ def build_session_report(session_id: int, db: Session):
             }
         )
 
-    expected_student_ids = {student.id for student in students}
-    unexpected_student_ids = [
-        student_id
-        for student_id in attendance_map
-        if student_id not in expected_student_ids
-    ]
-    if unexpected_student_ids:
-        cross_class_students = (
-            db.query(Student)
-            .filter(Student.id.in_(unexpected_student_ids), *official_student_filter())
-            .order_by(Student.full_name.asc())
-            .all()
-        )
-        for student in cross_class_students:
-            record = attendance_map.get(student.id)
-            if not record:
-                continue
-            report_rows.append(
-                {
-                    "record_id": record.id,
-                    "student_code": student.student_code,
-                    "full_name": student.full_name,
-                    "class_name": student.class_name,
-                    "subject": session.subject,
-                    "session_date": session.session_date.isoformat() if session.session_date else None,
-                    "start_time": session.start_time.isoformat() if session.start_time else None,
-                    "end_time": session.end_time.isoformat() if session.end_time else None,
-                    "status": record.status,
-                    "check_in_at": record.check_in_at.isoformat() if record.check_in_at else None,
-                    "check_out_at": record.check_out_at.isoformat() if record.check_out_at else None,
-                    "check_in_conf": record.check_in_conf,
-                    "check_out_conf": record.check_out_conf,
-                    "note": record.note,
-                }
-            )
-
     return session, report_rows
 
 

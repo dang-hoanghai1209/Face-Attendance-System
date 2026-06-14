@@ -166,7 +166,7 @@ def _session_membership_warning(student_data: dict | None, session: ClassSession
     if not student_data or not session:
         return None, None
     if student_data.get("class_name") != session.class_name:
-        return "Sinh viên không thuộc lớp học phần này", "not_enrolled"
+        return "Sinh viên không thuộc danh sách lớp học phần này", "not_enrolled"
     return None, None
 
 

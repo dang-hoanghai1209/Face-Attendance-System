@@ -64,7 +64,22 @@ class BackendMVP1Tests(unittest.TestCase):
                 )
             )
         for item in students:
-            self.db.add(Enrollment(session_id=session.id, student_id=item.id, status="active"))
+            if session.section_id:
+                exists = (
+                    self.db.query(Enrollment)
+                    .filter(Enrollment.course_section_id == session.section_id, Enrollment.student_id == item.id)
+                    .first()
+                )
+                if not exists:
+                    self.db.add(Enrollment(course_section_id=session.section_id, student_id=item.id, status="active"))
+            else:
+                exists = (
+                    self.db.query(Enrollment)
+                    .filter(Enrollment.session_id == session.id, Enrollment.student_id == item.id)
+                    .first()
+                )
+                if not exists:
+                    self.db.add(Enrollment(session_id=session.id, student_id=item.id, status="active"))
         self.db.commit()
 
     def add_user(self, username="64100001", role="student", full_name="Test User"):

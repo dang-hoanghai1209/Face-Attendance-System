@@ -114,6 +114,12 @@ const getLivenessStatusText = (result) => {
   return 'Kiểm tra khuôn mặt thật: Đang bật'
 }
 
+const getLivenessScoreText = (score) =>
+  typeof score === 'number' ? `Điểm kiểm tra khuôn mặt thật: ${(score * 100).toFixed(0)}%` : null
+
+const getLivenessThresholdText = (threshold) =>
+  typeof threshold === 'number' ? `Ngưỡng yêu cầu: ${(threshold * 100).toFixed(0)}%` : null
+
 export default function Attendance() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -906,6 +912,8 @@ export default function Attendance() {
           face_count,
           liveness_score,
           liveness_passed,
+          liveness_label,
+          liveness_threshold,
           capture_path,
         } = recRes.data
         const recognizedStudent = student || null
@@ -921,6 +929,8 @@ export default function Attendance() {
           bbox: null,
           liveness_score: liveness_score,
           liveness_passed: liveness_passed,
+          liveness_label: liveness_label,
+          liveness_threshold: liveness_threshold,
         }] : [])
 
         if (activeResults.length > 0) {
@@ -960,6 +970,8 @@ export default function Attendance() {
             confidence: finalScore || 0,
             livenessScore: finalScore,
             livenessPassed: false,
+            livenessLabel: spoofItem.liveness_label || liveness_label,
+            livenessThreshold: spoofItem.liveness_threshold ?? liveness_threshold,
             message: alertMsg
           })
           if (shouldShowAutoFeedback(isAuto, recognizedCode, 'spoof')) {
@@ -982,6 +994,8 @@ export default function Attendance() {
         const finalLivenessPassed = (primaryResult?.liveness_passed !== undefined)
           ? primaryResult.liveness_passed
           : liveness_passed
+        const finalLivenessLabel = primaryResult?.liveness_label || liveness_label
+        const finalLivenessThreshold = primaryResult?.liveness_threshold ?? liveness_threshold
 
         const blockMessage = official_attendance_warning ||
           (recognizedStudent && !isOfficialStudent(recognizedStudent) ? OFFICIAL_BLOCK_MESSAGE : '')
@@ -994,7 +1008,8 @@ export default function Attendance() {
           } else {
           const failureMessage = buildFailureMessage(failureStatus, blockMessage)
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
-            confidence, livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed, message: failureMessage })
+            confidence, livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed,
+            livenessLabel: finalLivenessLabel, livenessThreshold: finalLivenessThreshold, message: failureMessage })
           if (shouldShowAutoFeedback(isAuto, recognizedCode, failureStatus)) {
             setMessage(failureMessage)
           }
@@ -1032,7 +1047,8 @@ export default function Attendance() {
               ? alreadyCheckedInMessage
               : `Điểm danh thành công. Đã ghi nhận ${actionLabels[resultAction]} cho ${recognizedCode}.`
             setResult({ success: true, status: resultStatus, studentCode: recognizedCode, student: recognizedStudent, confidence, action: resultAction,
-              livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed, message: successMessage })
+              livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed,
+              livenessLabel: finalLivenessLabel, livenessThreshold: finalLivenessThreshold, message: successMessage })
             if (shouldShowAutoFeedback(isAuto, recognizedCode, resultStatus)) {
               setMessage(successMessage)
             }
@@ -1062,7 +1078,8 @@ export default function Attendance() {
           }
           const failureMessage = buildFailureMessage(status, recognitionMessages[status] || msg)
           setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
-            confidence, livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed, message: failureMessage })
+            confidence, livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed,
+            livenessLabel: finalLivenessLabel, livenessThreshold: finalLivenessThreshold, message: failureMessage })
           if (showFeedback) setMessage(failureMessage)
           if (window.innerWidth < 768) setMobileStep(4)
         }
@@ -1476,6 +1493,12 @@ export default function Attendance() {
                   <div><strong>Buổi học:</strong> {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</div>
                   <div><strong>Độ tương đồng:</strong> {formatConf(result.confidence)}</div>
                   <div><strong>{getLivenessStatusText(result)}</strong></div>
+                  {getLivenessScoreText(result.livenessScore) && (
+                    <div>{getLivenessScoreText(result.livenessScore)}</div>
+                  )}
+                  {getLivenessThresholdText(result.livenessThreshold) && (
+                    <div>{getLivenessThresholdText(result.livenessThreshold)}</div>
+                  )}
                   {result.action && <div><strong>Hình thức:</strong> Điểm danh {actionLabels[result.action]}</div>}
                 </div>
               )}
@@ -1692,6 +1715,12 @@ export default function Attendance() {
                     <p>Buổi học đang điểm danh: {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</p>
                     <p>Độ tin cậy: {formatConf(result.confidence)}</p>
                     <p>{getLivenessStatusText(result)}</p>
+                    {getLivenessScoreText(result.livenessScore) && (
+                      <p>{getLivenessScoreText(result.livenessScore)}</p>
+                    )}
+                    {getLivenessThresholdText(result.livenessThreshold) && (
+                      <p>{getLivenessThresholdText(result.livenessThreshold)}</p>
+                    )}
                     {result.success && result.action && (
                       <p>Trạng thái ghi nhận: Đã ghi nhận {actionLabels[result.action]}</p>
                     )}

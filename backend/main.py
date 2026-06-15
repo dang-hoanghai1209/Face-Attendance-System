@@ -14,6 +14,7 @@ import uvicorn
 from database import Base, SessionLocal, engine
 from face_service import (
     ENABLE_LEGACY_EMBEDDINGS,
+    LIVENESS_THRESHOLD,
     THRESHOLD_CONFIRM,
     THRESHOLD_UNCERTAIN,
     check_liveness,
@@ -299,10 +300,18 @@ def _recognize_uploaded_face_multi(
             "liveness_passed": False,
             "score": None,
             "label": "error",
+            "threshold": LIVENESS_THRESHOLD,
             "message": f"Không đạt kiểm tra khuôn mặt thật: {exc}",
         }
     liveness_score = liveness_result.get("score")
     liveness_passed = bool(liveness_result.get("liveness_passed", False))
+    liveness_label = liveness_result.get("label")
+    liveness_threshold = liveness_result.get("threshold")
+    liveness_debug = {
+        key: liveness_result.get(key)
+        for key in ("model", "face_confidence", "brightness_score", "sharpness_score")
+        if liveness_result.get(key) is not None
+    }
     if not liveness_passed:
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
         message = liveness_result.get("message") or "Phát hiện giả mạo khuôn mặt"
@@ -337,6 +346,9 @@ def _recognize_uploaded_face_multi(
             "confidence_percent": "0%" if liveness_score is None else f"{max(liveness_score, 0.0):.0%}",
             "liveness_score": liveness_score,
             "liveness_passed": False,
+            "liveness_label": liveness_label,
+            "liveness_threshold": liveness_threshold,
+            "liveness_debug": liveness_debug,
             "official_attendance_allowed": False,
             "official_attendance_warning": message,
             "official_attendance_warning_code": "spoof",
@@ -371,6 +383,9 @@ def _recognize_uploaded_face_multi(
                     "confidence_percent": "0%",
                     "liveness_score": liveness_score,
                     "liveness_passed": liveness_passed,
+                    "liveness_label": liveness_label,
+                    "liveness_threshold": liveness_threshold,
+                    "liveness_debug": liveness_debug,
                     "official_attendance_allowed": False,
                     "official_attendance_warning": None,
                     "processing_time_ms": processing_time_ms,
@@ -435,6 +450,9 @@ def _recognize_uploaded_face_multi(
             "confidence_percent": "0%",
             "liveness_score": liveness_score,
             "liveness_passed": liveness_passed,
+            "liveness_label": liveness_label,
+            "liveness_threshold": liveness_threshold,
+            "liveness_debug": liveness_debug,
             "official_attendance_allowed": False,
             "official_attendance_warning": None,
             "processing_time_ms": processing_time_ms,
@@ -509,6 +527,9 @@ def _recognize_uploaded_face_multi(
                     "confidence_percent": f"{max(similarity, 0.0):.0%}",
                     "liveness_score": liveness_score,
                     "liveness_passed": liveness_passed,
+                    "liveness_label": liveness_label,
+                    "liveness_threshold": liveness_threshold,
+                    "liveness_debug": liveness_debug,
                     "bbox": face.get("bbox"),
                     "official_attendance_allowed": official_warning is None and recognition_status in {"success", "uncertain"},
                     "official_attendance_warning": official_warning,

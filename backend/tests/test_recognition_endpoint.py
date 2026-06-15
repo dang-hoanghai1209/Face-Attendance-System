@@ -39,6 +39,7 @@ class RecognitionEndpointTests(unittest.TestCase):
             "liveness_passed": True,
             "score": 0.99,
             "label": "live",
+            "threshold": 0.45,
         }
 
     def tearDown(self):
@@ -210,7 +211,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
         self.assertEqual(audit.status, "spoof")
 
-    def test_recognize_liveness_unavailable_returns_spoof_without_recognition(self):
+    def test_recognize_liveness_error_returns_spoof_without_recognition(self):
         session = self.add_session()
         face_service.ENABLE_LIVENESS = True
         face_service.LIVENESS_THRESHOLD = 0.8
@@ -221,8 +222,11 @@ class RecognitionEndpointTests(unittest.TestCase):
         result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
 
         self.assertEqual(result["status"], "spoof")
-        self.assertEqual(result["message"], "Không đạt kiểm tra khuôn mặt thật")
+        self.assertIn("Không đạt kiểm tra khuôn mặt thật", result["message"])
         self.assertIsNone(result["liveness_score"])
+        self.assertFalse(result["liveness_passed"])
+        self.assertEqual(result["liveness_label"], "error")
+        self.assertEqual(result["liveness_threshold"], main.LIVENESS_THRESHOLD)
         self.assertEqual(result["confidence"], -1.0)
         self.assertEqual(result["results"], [])
         self.assertEqual(result["face_count"], 0)
@@ -265,6 +269,8 @@ class RecognitionEndpointTests(unittest.TestCase):
             "status",
             "liveness_score",
             "liveness_passed",
+            "liveness_label",
+            "liveness_threshold",
             "bbox",
         }
         for item in result["results"]:
@@ -276,6 +282,8 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["status"], "success")
         self.assertEqual(result["results"][0]["liveness_score"], 0.99)
         self.assertTrue(result["results"][0]["liveness_passed"])
+        self.assertEqual(result["results"][0]["liveness_label"], "live")
+        self.assertEqual(result["results"][0]["liveness_threshold"], 0.45)
         self.assertEqual(result["results"][0]["bbox"], {"x": 10, "y": 20, "w": 30, "h": 40})
         self.assertEqual(result["results"][1]["status"], "uncertain")
         self.assertEqual(result["results"][1]["student_code"], "63123457")
@@ -313,6 +321,8 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertIsNone(result["results"][2]["class_name"])
         self.assertEqual(result["results"][2]["liveness_score"], 0.99)
         self.assertTrue(result["results"][2]["liveness_passed"])
+        self.assertEqual(result["results"][2]["liveness_label"], "live")
+        self.assertEqual(result["results"][2]["liveness_threshold"], 0.45)
         self.assertEqual(result["results"][2]["bbox"], {"x": 3, "y": 3, "w": 10, "h": 10})
 
     def test_invalid_liveness_threshold_env_falls_back_without_import_crash(self):
@@ -322,7 +332,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         os.environ["ENABLE_LIVENESS"] = "false"
         try:
             reloaded = importlib.reload(face_service)
-            self.assertEqual(reloaded.LIVENESS_THRESHOLD, 0.8)
+            self.assertEqual(reloaded.LIVENESS_THRESHOLD, 0.45)
             self.assertEqual(reloaded.check_liveness(b"image")["label"], "disabled")
         finally:
             if original_env is None:

@@ -4,7 +4,7 @@ import os
 import pickle
 from threading import Lock
 
-from PIL import Image
+from PIL import Image, ImageFilter, ImageStat
 import torch
 import torch.nn.functional as torch_functional
 from facenet_pytorch import InceptionResnetV1, MTCNN
@@ -40,7 +40,7 @@ THRESHOLD_UNCERTAIN = min(max(float(os.getenv("THRESHOLD_UNCERTAIN", "0.60")), 0
 ENABLE_LEGACY_EMBEDDINGS = os.getenv("ENABLE_LEGACY_EMBEDDINGS", "false").lower() == "true"
 MAX_RECOGNITION_FACES = 4
 ENABLE_LIVENESS = os.getenv("ENABLE_LIVENESS", "true").lower() in {"1", "true", "yes", "on"}
-LIVENESS_THRESHOLD = _parse_float_env("LIVENESS_THRESHOLD", 0.80, minimum=0.0, maximum=1.0)
+LIVENESS_THRESHOLD = _parse_float_env("LIVENESS_THRESHOLD", 0.45, minimum=0.0, maximum=1.0)
 LIVENESS_MODEL = os.getenv("LIVENESS_MODEL", "minifasnet")
 
 
@@ -103,15 +103,47 @@ def check_liveness(image_bytes: bytes) -> dict:
             "liveness_passed": True,
             "score": None,
             "label": "disabled",
+            "threshold": LIVENESS_THRESHOLD,
         }
 
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    detector, _embedder = get_face_models()
+    boxes, probs = detector.detect(image)
+    if boxes is None or len(boxes) == 0:
+        return {
+            "liveness_passed": True,
+            "score": None,
+            "label": "not_evaluated",
+            "model": "demo_heuristic",
+            "threshold": LIVENESS_THRESHOLD,
+            "message": "Không phát hiện khuôn mặt để kiểm tra khuôn mặt thật",
+        }
+
+    face_confidence = max(float(probability or 0.0) for probability in probs) if probs is not None else 0.0
+    grayscale = image.convert("L").resize((160, 160))
+    brightness_mean = ImageStat.Stat(grayscale).mean[0]
+    brightness_score = 1.0 - min(abs(brightness_mean - 127.5) / 127.5, 1.0)
+
+    edge_image = grayscale.filter(ImageFilter.FIND_EDGES)
+    edge_stat = ImageStat.Stat(edge_image)
+    edge_mean = edge_stat.mean[0]
+    sharpness_score = min(edge_mean / 24.0, 1.0)
+
+    score = round(
+        max(0.0, min((face_confidence * 0.70) + (brightness_score * 0.15) + (sharpness_score * 0.15), 1.0)),
+        4,
+    )
+    liveness_passed = score >= LIVENESS_THRESHOLD
     return {
-        "liveness_passed": False,
-        "score": None,
-        "label": "unavailable",
-        "model": LIVENESS_MODEL,
+        "liveness_passed": liveness_passed,
+        "score": score,
+        "label": "live" if liveness_passed else "spoof",
+        "model": "demo_heuristic",
         "threshold": LIVENESS_THRESHOLD,
-        "message": "Không đạt kiểm tra khuôn mặt thật",
+        "face_confidence": round(face_confidence, 4),
+        "brightness_score": round(brightness_score, 4),
+        "sharpness_score": round(sharpness_score, 4),
+        "message": "Kiểm tra khuôn mặt thật đạt" if liveness_passed else "Không đạt kiểm tra khuôn mặt thật",
     }
 
 

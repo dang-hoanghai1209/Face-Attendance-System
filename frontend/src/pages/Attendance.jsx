@@ -36,7 +36,7 @@ const isOfficialStudent = (student) =>
   student?.data_source === 'real' && !student?.is_demo && student?.face_status === 'registered'
 
 const getStyle = (status) => {
-  if (status === 'success')   return { bg: 'rgba(0,201,167,.14)', border: 'rgba(0,201,167,.45)', accent: '#2dd4bf', text: '#f8fafc', muted: '#99f6e4', label: 'Điểm danh thành công' }
+  if (status === 'success' || status === 'already_checked_in')   return { bg: 'rgba(0,201,167,.14)', border: 'rgba(0,201,167,.45)', accent: '#2dd4bf', text: '#f8fafc', muted: '#99f6e4', label: 'Điểm danh thành công' }
   if (status === 'not_enrolled') return { bg: 'rgba(249,115,22,.14)', border: 'rgba(249,115,22,.45)', accent: '#fb923c', text: '#f8fafc', muted: '#fed7aa', label: 'Cảnh báo điểm danh' }
   if (status === 'uncertain' || status === 'blocked') return { bg: 'rgba(245,158,11,.14)', border: 'rgba(245,158,11,.45)', accent: '#fbbf24', text: '#f8fafc', muted: '#fde68a', label: 'Điểm danh thất bại' }
   return                             { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Điểm danh thất bại' }
@@ -83,6 +83,9 @@ const attendanceFailureReasons = {
 }
 
 const notEnrolledAlertMessage = 'Sinh viên không thuộc danh sách lớp học phần này'
+const AUTO_SCAN_INTERVAL_MS = 3000
+const AUTO_FEEDBACK_COOLDOWN_MS = 12000
+const alreadyCheckedInMessage = 'Sinh viên đã được ghi nhận điểm danh trước đó'
 
 const isNotEnrolledAlert = (status, alertType) =>
   (status || '').toLowerCase() === 'not_enrolled' ||
@@ -98,6 +101,11 @@ const buildFailureMessage = (status, fallback) => {
 const buildNotEnrolledResultMessage = () =>
   notEnrolledAlertMessage
 
+const formatScanTime = (date) => {
+  if (!date) return 'Chưa quét'
+  return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export default function Attendance() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -106,6 +114,10 @@ export default function Attendance() {
   const videoRef  = useRef(null)
   const canvasRef = useRef(null)
   const overlayCanvasRef = useRef(null)
+  const autoScanTimerRef = useRef(null)
+  const autoProcessingRef = useRef(false)
+  const autoFeedbackCooldownRef = useRef(new Map())
+  const currentSessionIdRef = useRef('')
 
   const [stream,             setStream]             = useState(null)
   const [sessions,           setSessions]           = useState([])
@@ -122,6 +134,9 @@ export default function Attendance() {
   const [testPreviewUrl,     setTestPreviewUrl]     = useState('')
   const [testResult,         setTestResult]         = useState(null)
   const [testLoading,        setTestLoading]        = useState(false)
+  const [isAutoScanning,     setIsAutoScanning]     = useState(false)
+  const [isProcessingFrame,  setIsProcessingFrame]  = useState(false)
+  const [lastAutoScanAt,     setLastAutoScanAt]     = useState(null)
 
   // Mobile states
   const [isMobile,           setIsMobile]           = useState(window.innerWidth < 768)
@@ -138,6 +153,7 @@ export default function Attendance() {
     () => sessions.find((session) => String(session.id || session.session_id) === String(sessionId)),
     [sessions, sessionId],
   )
+  currentSessionIdRef.current = sessionId
 
   const selectedClassroom = useMemo(() => {
     if (!selectedSession) return null
@@ -492,6 +508,48 @@ export default function Attendance() {
     return () => clearTimeout(timer)
   }, [alertToast])
 
+  const stopAutoScan = () => {
+    if (autoScanTimerRef.current) {
+      clearInterval(autoScanTimerRef.current)
+      autoScanTimerRef.current = null
+    }
+    setIsAutoScanning(false)
+  }
+
+  const shouldShowAutoFeedback = (isAuto, studentCode, status) => {
+    if (!isAuto) return true
+    const key = `${studentCode || 'unknown'}:${status || 'unknown'}`
+    const now = Date.now()
+    const lastShownAt = autoFeedbackCooldownRef.current.get(key) || 0
+    if (now - lastShownAt < AUTO_FEEDBACK_COOLDOWN_MS) return false
+    autoFeedbackCooldownRef.current.set(key, now)
+    return true
+  }
+
+  useEffect(() => {
+    stopAutoScan()
+    autoFeedbackCooldownRef.current.clear()
+    setLastAutoScanAt(null)
+  }, [sessionId, selectedSectionKey])
+
+  useEffect(() => {
+    if (!isAutoScanning || !stream || !sessionId) return undefined
+    autoScanTimerRef.current = setInterval(() => {
+      captureAndProcess({ auto: true })
+    }, AUTO_SCAN_INTERVAL_MS)
+    return () => {
+      if (autoScanTimerRef.current) {
+        clearInterval(autoScanTimerRef.current)
+        autoScanTimerRef.current = null
+      }
+    }
+  }, [isAutoScanning, stream, sessionId, gpsCoords, action])
+
+  useEffect(() => {
+    return () => {
+      if (autoScanTimerRef.current) clearInterval(autoScanTimerRef.current)
+    }
+  }, [])
 
   const drawBoundingBoxes = (results) => {
     const canvas = overlayCanvasRef.current
@@ -557,19 +615,22 @@ export default function Attendance() {
     })
   }
 
-  const handleCheckinResult = (checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore) => {
+  const handleCheckinResult = (checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore, options = {}) => {
     const checkinStatus = (checkinData.status || '').toLowerCase()
     
     if (['spoof', 'unknown', 'unknown_face', 'not_enrolled', 'late_entry', 'not_started', 'early', 'expired', 'attendance_closed', 'gps_out_of_range', 'insufficient_enrollments'].includes(checkinStatus)) {
       const isEnrollmentAlert = isNotEnrolledAlert(checkinStatus, checkinData.alert_type)
       const alertMsg = isEnrollmentAlert ? buildNotEnrolledResultMessage() : buildFailureMessage(checkinStatus, checkinData.message)
       
-      setAlertToast({
-        type: checkinStatus,
-        message: alertMsg,
-        alertId: checkinData.alert_id,
-        alertType: checkinData.alert_type,
-      })
+      const showFeedback = shouldShowAutoFeedback(options.isAuto, recognizedCode, checkinStatus)
+      if (showFeedback) {
+        setAlertToast({
+          type: checkinStatus,
+          message: alertMsg,
+          alertId: checkinData.alert_id,
+          alertType: checkinData.alert_type,
+        })
+      }
       
       setResult({
         success: false,
@@ -581,14 +642,14 @@ export default function Attendance() {
         livenessScore: finalLivenessScore,
         message: alertMsg,
       })
-      setMessage(alertMsg)
+      if (showFeedback) setMessage(alertMsg)
       if (window.innerWidth < 768) setMobileStep(4)
       return true
     }
     return false
   }
 
-  const handleCheckinError = (err, recognizedCode, recognizedStudent, confidence, finalLivenessScore) => {
+  const handleCheckinError = (err, recognizedCode, recognizedStudent, confidence, finalLivenessScore, options = {}) => {
     const responseData = err.response?.data
     const status = responseData?.status || responseData?.detail?.status
     const msg = responseData?.message || responseData?.detail?.message
@@ -599,12 +660,15 @@ export default function Attendance() {
       const isEnrollmentAlert = isNotEnrolledAlert(mappedStatus, responseAlertType)
       const alertMsg = isEnrollmentAlert ? buildNotEnrolledResultMessage() : buildFailureMessage(mappedStatus, msg)
       
-      setAlertToast({
-        type: mappedStatus,
-        message: alertMsg,
-        alertId: responseData?.alert_id || responseData?.detail?.alert_id,
-        alertType: responseAlertType,
-      })
+      const showFeedback = shouldShowAutoFeedback(options.isAuto, recognizedCode, mappedStatus)
+      if (showFeedback) {
+        setAlertToast({
+          type: mappedStatus,
+          message: alertMsg,
+          alertId: responseData?.alert_id || responseData?.detail?.alert_id,
+          alertType: responseAlertType,
+        })
+      }
       
       setResult({
         success: false,
@@ -616,7 +680,7 @@ export default function Attendance() {
         livenessScore: finalLivenessScore,
         message: alertMsg,
       })
-      setMessage(alertMsg)
+      if (showFeedback) setMessage(alertMsg)
       if (window.innerWidth < 768) setMobileStep(4)
       return true
     }
@@ -715,6 +779,7 @@ export default function Attendance() {
   }
 
   const stopCamera = () => {
+    stopAutoScan()
     stream?.getTracks().forEach((t) => t.stop())
     setStream(null)
     const canvas = overlayCanvasRef.current
@@ -724,13 +789,34 @@ export default function Attendance() {
     }
   }
 
+  const toggleAutoScan = () => {
+    if (isAutoScanning) {
+      stopAutoScan()
+      setMessage('Đã tắt quét tự động.')
+      return
+    }
+    if (!sessionId || !selectedSectionKey) {
+      setMessage('Hãy chọn lớp học phần và buổi học trước khi bật quét tự động.')
+      return
+    }
+    if (!stream || !videoRef.current) {
+      setMessage('Hãy bật camera trước khi bật quét tự động.')
+      return
+    }
+    autoFeedbackCooldownRef.current.clear()
+    setLastAutoScanAt(null)
+    setIsAutoScanning(true)
+    setMessage('Đã bật quét tự động.')
+  }
+
   // ── Điểm danh ────────────────────────────────────────────────── //
-  const postAttendanceAction = (studentCode, confidence, act = action) => {
+  const postAttendanceAction = (studentCode, confidence, act = action, options = {}) => {
     const payload = {
       student_code: studentCode,
       session_id:   Number(sessionId),
       confidence,
     }
+    if (options.mode) payload.mode = options.mode
     // Gửi kèm thông số GPS nếu có sẵn
     if (gpsCoords) {
       payload.gps_lat = gpsCoords.lat
@@ -740,10 +826,16 @@ export default function Attendance() {
     return api.post(act === 'checkout' ? '/attendance/checkout' : '/attendance/checkin', payload)
   }
 
-  const captureAndProcess = async () => {
+  const captureAndProcess = async (options = {}) => {
+    const isAuto = options?.auto === true
+    if (autoProcessingRef.current) return
     if (!sessionId) { setMessage('Hãy chọn buổi học trước.'); return }
     if (!stream || !videoRef.current) { setMessage('Hãy bật camera trước.'); return }
 
+    autoProcessingRef.current = true
+    setIsProcessingFrame(true)
+    if (isAuto) setLastAutoScanAt(new Date())
+    const scanSessionId = sessionId
     setLoading(true)
 
     // Clear old bounding boxes
@@ -760,7 +852,13 @@ export default function Attendance() {
     context.drawImage(videoRef.current, 0, 0)
 
     canvas.toBlob(async (blob) => {
-      if (!blob) { setMessage('Không thể chụp ảnh từ camera.'); setLoading(false); return }
+      if (!blob) {
+        setMessage('Không thể chụp ảnh từ camera.')
+        setLoading(false)
+        setIsProcessingFrame(false)
+        autoProcessingRef.current = false
+        return
+      }
 
       const formData = new FormData()
       formData.append('file', blob, 'capture.jpg')
@@ -828,13 +926,15 @@ export default function Attendance() {
             livenessScore: finalScore,
             message: alertMsg
           })
-          setMessage(alertMsg)
-          setAlertToast({
-            type: 'spoof',
-            message: alertMsg,
-            alertId: recRes.data.alert_id,
-            alertType: recRes.data.alert_type || 'SPOOF',
-          })
+          if (shouldShowAutoFeedback(isAuto, recognizedCode, 'spoof')) {
+            setMessage(alertMsg)
+            setAlertToast({
+              type: 'spoof',
+              message: alertMsg,
+              alertId: recRes.data.alert_id,
+              alertType: recRes.data.alert_type || 'SPOOF',
+            })
+          }
           if (window.innerWidth < 768) setMobileStep(4)
           return
         }
@@ -856,27 +956,45 @@ export default function Attendance() {
           const failureMessage = buildFailureMessage(failureStatus, blockMessage)
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
             confidence, livenessScore: finalLivenessScore, message: failureMessage })
-          setMessage(failureMessage)
+          if (shouldShowAutoFeedback(isAuto, recognizedCode, failureStatus)) {
+            setMessage(failureMessage)
+          }
           if (window.innerWidth < 768) setMobileStep(4)
           return
           }
         }
 
         if ((status === 'success' || status === 'uncertain') && recognizedCode) {
+          if (isAuto && currentSessionIdRef.current !== scanSessionId) {
+            return
+          }
           try {
-            const checkinRes = await postAttendanceAction(recognizedCode, confidence)
+            const checkinRes = await postAttendanceAction(
+              recognizedCode,
+              confidence,
+              isAuto ? 'checkin' : action,
+              isAuto ? { mode: 'auto_scan' } : {},
+            )
             const checkinData = checkinRes.data
-            const isAlert = handleCheckinResult(checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore)
+            const isAlert = handleCheckinResult(checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore, { isAuto })
             if (isAlert) {
               return
             }
-            setResult({ success: true, status: 'success', studentCode: recognizedCode, student: recognizedStudent, confidence, action,
-              livenessScore: finalLivenessScore, message: `Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.` })
-            setMessage(`Đã ghi nhận ${actionLabels[action]} cho ${recognizedCode}.`)
+            const checkinStatus = (checkinData.status || '').toLowerCase()
+            const resultStatus = checkinStatus === 'already_checked_in' ? 'already_checked_in' : 'success'
+            const resultAction = isAuto ? 'checkin' : action
+            const successMessage = resultStatus === 'already_checked_in'
+              ? alreadyCheckedInMessage
+              : `Điểm danh thành công. Đã ghi nhận ${actionLabels[resultAction]} cho ${recognizedCode}.`
+            setResult({ success: true, status: resultStatus, studentCode: recognizedCode, student: recognizedStudent, confidence, action: resultAction,
+              livenessScore: finalLivenessScore, message: successMessage })
+            if (shouldShowAutoFeedback(isAuto, recognizedCode, resultStatus)) {
+              setMessage(successMessage)
+            }
             await loadSessionAttendance(sessionId)
             if (window.innerWidth < 768) setMobileStep(4)
           } catch (err) {
-            const isAlert = handleCheckinError(err, recognizedCode, recognizedStudent, confidence, finalLivenessScore)
+            const isAlert = handleCheckinError(err, recognizedCode, recognizedStudent, confidence, finalLivenessScore, { isAuto })
             if (isAlert) {
               return
             }
@@ -884,27 +1002,35 @@ export default function Attendance() {
           }
 
         } else {
+          const failureStatusKey = status || 'failure'
+          const showFeedback = shouldShowAutoFeedback(isAuto, recognizedCode, failureStatusKey)
           if (status === 'unknown' || status === 'unknown_face' || status === 'uncertain') {
             const alertMsg = buildFailureMessage(status === 'uncertain' ? 'unknown' : status)
-            setAlertToast({
-              type: 'unknown',
-              message: alertMsg,
-              alertId: recRes.data.alert_id,
-              alertType: recRes.data.alert_type || 'UNKNOWN_FACE',
-            })
+            if (showFeedback) {
+              setAlertToast({
+                type: 'unknown',
+                message: alertMsg,
+                alertId: recRes.data.alert_id,
+                alertType: recRes.data.alert_type || 'UNKNOWN_FACE',
+              })
+            }
           }
           const failureMessage = buildFailureMessage(status, recognitionMessages[status] || msg)
           setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
             confidence, livenessScore: finalLivenessScore, message: failureMessage })
-          setMessage(failureMessage)
+          if (showFeedback) setMessage(failureMessage)
           if (window.innerWidth < 768) setMobileStep(4)
         }
       } catch (err) {
         setResult(null)
-        setMessage(buildFailureMessage('', getApiErrorMessage(err, 'Không xử lý được nhận diện.')))
+        if (shouldShowAutoFeedback(isAuto, 'request', 'error')) {
+          setMessage(buildFailureMessage('', getApiErrorMessage(err, 'Không xử lý được nhận diện.')))
+        }
         if (window.innerWidth < 768) setMobileStep(4)
       } finally {
         setLoading(false)
+        setIsProcessingFrame(false)
+        autoProcessingRef.current = false
       }
     }, 'image/jpeg', 0.95)
   }
@@ -1247,6 +1373,26 @@ export default function Attendance() {
                   {loading ? 'Đang xử lý...' : `Ghi nhận ${actionLabels[action]}`}
                 </button>
               </div>
+
+              <button
+                className={isAutoScanning ? 'secondary' : ''}
+                onClick={toggleAutoScan}
+                disabled={!stream || !sessionId}
+                style={{ minHeight: 48 }}
+              >
+                {isAutoScanning ? 'Tắt quét tự động' : 'Bật quét tự động'}
+              </button>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <span className={`badge ${stream ? 'success' : 'muted'}`}>
+                  {stream ? 'Camera đang bật' : 'Camera đang tắt'}
+                </span>
+                <span className={`badge ${isAutoScanning ? 'success' : 'muted'}`}>
+                  {isAutoScanning ? 'Đang quét tự động mỗi 3 giây' : 'Quét tự động đã tắt'}
+                </span>
+                <span className="badge info">Lần quét gần nhất: {formatScanTime(lastAutoScanAt)}</span>
+                {isProcessingFrame && <span className="badge warning">Đang xử lý...</span>}
+              </div>
             </div>
           </div>
         )
@@ -1470,6 +1616,24 @@ export default function Attendance() {
                   <button onClick={captureAndProcess} disabled={!stream || loading || !sessionId}>
                     {loading ? 'Đang xử lý...' : `Nhận diện ${actionLabels[action]}`}
                   </button>
+                  <button
+                    className={isAutoScanning ? 'secondary' : ''}
+                    onClick={toggleAutoScan}
+                    disabled={!stream || !sessionId}
+                  >
+                    {isAutoScanning ? 'Tắt quét tự động' : 'Bật quét tự động'}
+                  </button>
+                </div>
+
+                <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  <span className={`badge ${stream ? 'success' : 'muted'}`}>
+                    {stream ? 'Camera đang bật' : 'Camera đang tắt'}
+                  </span>
+                  <span className={`badge ${isAutoScanning ? 'success' : 'muted'}`}>
+                    {isAutoScanning ? 'Đang quét tự động mỗi 3 giây' : 'Quét tự động đã tắt'}
+                  </span>
+                  <span className="badge info">Lần quét gần nhất: {formatScanTime(lastAutoScanAt)}</span>
+                  {isProcessingFrame && <span className="badge warning">Đang xử lý...</span>}
                 </div>
 
                 {result && (

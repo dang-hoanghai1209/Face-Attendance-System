@@ -27,6 +27,7 @@ class AttendanceCheckIn(BaseModel):
     liveness_passed: Optional[bool] = None
     liveness_score: Optional[float] = None
     recognition_status: Optional[str] = None
+    mode: Optional[str] = None
 
 
 class AttendanceCheckOut(BaseModel):

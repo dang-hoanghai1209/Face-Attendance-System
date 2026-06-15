@@ -200,7 +200,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertTrue(scans[0].liveness_passed)
         self.assertEqual(scans[0].note, "check_in")
 
-    def test_checkin_fsm_marks_left_early_then_restores_original_status(self):
+    def test_repeat_checkin_returns_already_checked_in_without_changing_status(self):
         student = self.add_student()
         session = self.add_session()
         self.add_min_session_enrollments(session, student)
@@ -226,7 +226,8 @@ class AttendanceReportServiceTests(unittest.TestCase):
             gps_lat=session.latitude,
             gps_lng=session.longitude,
         )
-        self.assertEqual(second["data"]["status"], "left_early")
+        self.assertEqual(second["status"], "already_checked_in")
+        self.assertEqual(second["data"]["status"], "present")
         self.restore_now()
 
         self.patch_now(datetime(2026, 5, 30, 7, 36))
@@ -246,10 +247,12 @@ class AttendanceReportServiceTests(unittest.TestCase):
             .order_by(AttendanceScan.scan_index.asc())
             .all()
         )
+        self.assertEqual(third["status"], "already_checked_in")
         self.assertEqual(third["data"]["status"], "present")
+        self.assertEqual(record.status, "present")
         self.assertEqual(record.scan_count, 3)
         self.assertEqual([scan.scan_index for scan in scans], [1, 2, 3])
-        self.assertEqual([scan.note for scan in scans], ["check_in", "marked_left_early", "restored_attendance"])
+        self.assertEqual([scan.note for scan in scans], ["check_in", "already_checked_in", "already_checked_in"])
 
     def test_manual_attendance_service_is_removed(self):
         self.assertFalse(hasattr(attendance_service, "record_manual_attendance"))
@@ -334,14 +337,10 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(response["status"], "success")
         self.assertEqual(self.db.query(Attendance).count(), 1)
 
-    def test_checkin_rejects_session_with_less_than_five_enrollments(self):
+    def test_checkin_rejects_session_with_less_than_minimum_enrollments(self):
         student = self.add_student()
-        extra_students = [
-            self.add_student(student_code=f"6313388{index}", full_name=f"Student {index}")
-            for index in range(1, 4)
-        ]
         session = self.add_session()
-        self.add_session_enrollments(session, [student, *extra_students])
+        self.add_session_enrollments(session, [student])
         self.patch_now(datetime(2026, 5, 30, 7, 35))
 
         with self.assertRaises(Exception) as ctx:
@@ -355,9 +354,9 @@ class AttendanceReportServiceTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 403)
         self.assertEqual(ctx.exception.detail["status"], "insufficient_enrollments")
-        self.assertEqual(ctx.exception.detail["message"], "Buổi học cần tối thiểu 5 sinh viên đã được đăng ký")
-        self.assertEqual(ctx.exception.detail["enrollment_count"], 4)
-        self.assertEqual(ctx.exception.detail["minimum_required"], 5)
+        self.assertEqual(ctx.exception.detail["message"], attendance_service.MIN_SESSION_ENROLLMENTS_MESSAGE)
+        self.assertEqual(ctx.exception.detail["enrollment_count"], 1)
+        self.assertEqual(ctx.exception.detail["minimum_required"], attendance_service.MIN_SESSION_ENROLLMENTS)
 
     def test_checkin_allows_session_with_at_least_five_enrollments(self):
         student = self.add_student()

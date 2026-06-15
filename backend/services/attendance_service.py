@@ -18,8 +18,8 @@ from services.timezone_service import now_in_app_timezone
 EARLY_CHECKIN_MINUTES = 15
 PRESENT_WINDOW_MINUTES = 1
 LATE_THRESHOLD_MINUTES = 10
-MIN_SESSION_ENROLLMENTS = 5
-MIN_SESSION_ENROLLMENTS_MESSAGE = "Buổi học cần tối thiểu 5 sinh viên đã được đăng ký"
+MIN_SESSION_ENROLLMENTS = 3
+MIN_SESSION_ENROLLMENTS_MESSAGE = "Buổi học cần tối thiểu 3 sinh viên đã được đăng ký"
 ATTENDED_STATUSES = {"present", "late", "left_early"}
 OFFICIAL_ATTENDANCE_BLOCK_MESSAGE = (
     "Mẫu này thuộc dữ liệu demo/Kaggle, không được ghi nhận điểm danh chính thức."
@@ -268,11 +268,12 @@ def serialize_record(record: Attendance, student: Student):
 
 def flatten_checkin_response(status: str, message: str, record: Attendance, student: Student, allowed_radius_meters=None):
     data = serialize_record(record, student)
+    is_success = status in {"success", "already_checked_in"}
     return {
         "status": status,
-        "success": status == "success",
-        "recorded": status == "success",
-        "reason": None if status == "success" else status,
+        "success": is_success,
+        "recorded": is_success,
+        "reason": None if is_success else status,
         "message": message,
         "student_code": student.student_code,
         "full_name": student.full_name,
@@ -333,8 +334,8 @@ def create_attendance_scan(
 
 def already_checked_in_response(record: Attendance, student: Student, session: ClassSession | None = None, db: Session | None = None):
     return flatten_checkin_response(
-        "success",
-        "Điểm danh thành công.",
+        "already_checked_in",
+        "Sinh viên đã được ghi nhận điểm danh trước đó.",
         record,
         student,
         allowed_radius_for_session(db, session) if db is not None and session is not None else None,
@@ -448,6 +449,24 @@ def record_checkin(
             alert,
         )
 
+    existing = get_session_record(db, student.id, session_id)
+    if existing:
+        scan_at = now_in_app_timezone()
+        gps_data = validate_gps(db, session, gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy=gps_accuracy) or {}
+        create_attendance_scan(
+            db,
+            existing,
+            scanned_at=scan_at,
+            confidence=confidence,
+            gps_lat=gps_data.get("gps_lat"),
+            gps_lng=gps_data.get("gps_lng"),
+            liveness_passed=liveness_passed,
+            note="already_checked_in",
+        )
+        db.commit()
+        db.refresh(existing)
+        return already_checked_in_response(existing, student, session, db)
+
     check_in_at = now_in_app_timezone()
     try:
         validate_checkin_window(session, check_in_at)
@@ -473,32 +492,7 @@ def record_checkin(
             )
         raise
 
-    existing = get_session_record(db, student.id, session_id)
     gps_data = validate_gps(db, session, gps_lat=gps_lat, gps_lng=gps_lng, gps_accuracy=gps_accuracy) or {}
-
-    if existing:
-        if existing.status in {"present", "late"}:
-            existing.status = "left_early"
-            scan_note = "marked_left_early"
-        elif existing.status == "left_early":
-            existing.status = calculate_attendance_status(session, existing.check_in_at or check_in_at)
-            scan_note = "restored_attendance"
-        else:
-            scan_note = "unchanged"
-
-        create_attendance_scan(
-            db,
-            existing,
-            scanned_at=check_in_at,
-            confidence=confidence,
-            gps_lat=gps_data.get("gps_lat"),
-            gps_lng=gps_data.get("gps_lng"),
-            liveness_passed=liveness_passed,
-            note=scan_note,
-        )
-        db.commit()
-        db.refresh(existing)
-        return already_checked_in_response(existing, student, session, db)
 
     record = Attendance(
         student_id=student.id,

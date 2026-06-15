@@ -17,6 +17,10 @@ const initialForm = {
 }
 const initialModalForm = {
   ...initialForm,
+  classroom_id: '',
+  latitude: '',
+  longitude: '',
+  radius_meters: '',
   room_name: '',
   note: '',
 }
@@ -199,6 +203,7 @@ export default function Sessions() {
   const [loading,   setLoading]   = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [subjects, setSubjects] = useState([])
+  const [classrooms, setClassrooms] = useState([])
   const [editModalTarget, setEditModalTarget] = useState(null)
   const [editModalForm, setEditModalForm] = useState(initialModalForm)
   const [editModalErrors, setEditModalErrors] = useState(emptyErrors)
@@ -305,6 +310,20 @@ export default function Sessions() {
     });
   }, [selectedGroup, drawerFilter]);
 
+  const activeClassrooms = useMemo(() => (
+    classrooms.filter((classroom) => classroom.is_active)
+  ), [classrooms])
+
+  const selectedEditModalRoom = useMemo(() => {
+    if (!editModalForm.classroom_id) return null
+    return classrooms.find((classroom) => classroom.id === parseInt(editModalForm.classroom_id, 10)) || null
+  }, [editModalForm.classroom_id, classrooms])
+
+  const getClassroomOptionLabel = (classroom) => {
+    if (!classroom) return ''
+    return classroom.building ? `${classroom.building} - ${classroom.name}` : classroom.name
+  }
+
   const openGroupDetails = (groupKey) => {
     setDrawerFilter('all')
     setSelectedGroupKey(groupKey)
@@ -344,12 +363,14 @@ export default function Sessions() {
 
   const loadSessions = async () => {
     try {
-      const [resSessions, resSubjects] = await Promise.all([
+      const [resSessions, resSubjects, resClassrooms] = await Promise.all([
         api.get('/sessions/'),
-        api.get('/subjects/')
+        api.get('/subjects/'),
+        api.get('/classrooms/')
       ])
       setSessions(resSessions.data)
       setSubjects(resSubjects.data)
+      setClassrooms(resClassrooms.data)
       loadAlertCounts(resSessions.data)
     } catch (error) {
       setMessage(getApiErrorMessage(error, 'Không tải được danh sách dữ liệu.'))
@@ -360,13 +381,15 @@ export default function Sessions() {
     let mounted = true
     const load = async () => {
       try {
-        const [resSessions, resSubjects] = await Promise.all([
+        const [resSessions, resSubjects, resClassrooms] = await Promise.all([
           api.get('/sessions/'),
-          api.get('/subjects/')
+          api.get('/subjects/'),
+          api.get('/classrooms/')
         ])
         if (mounted) {
           setSessions(resSessions.data)
           setSubjects(resSubjects.data)
+          setClassrooms(resClassrooms.data)
           loadAlertCounts(resSessions.data)
         }
       } catch (error) {
@@ -419,6 +442,24 @@ export default function Sessions() {
     }
     if (Object.prototype.hasOwnProperty.call(source, 'room_name')) {
       payload.room_name = source.room_name ? source.room_name.trim() : null
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'classroom_id')) {
+      payload.classroom_id = source.classroom_id ? Number(source.classroom_id) : null
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'latitude')) {
+      payload.latitude = source.latitude !== '' && source.latitude !== null && source.latitude !== undefined
+        ? Number(source.latitude)
+        : null
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'longitude')) {
+      payload.longitude = source.longitude !== '' && source.longitude !== null && source.longitude !== undefined
+        ? Number(source.longitude)
+        : null
+    }
+    if (Object.prototype.hasOwnProperty.call(source, 'radius_meters')) {
+      payload.radius_meters = source.radius_meters !== '' && source.radius_meters !== null && source.radius_meters !== undefined
+        ? Number(source.radius_meters)
+        : null
     }
     if (Object.prototype.hasOwnProperty.call(source, 'note')) {
       payload.note = source.note ? source.note.trim() : null
@@ -486,6 +527,10 @@ export default function Sessions() {
       session_date: getSessionDateValue(session),
       start_time: toTimeInput(session.start_time),
       end_time: toTimeInput(session.end_time),
+      classroom_id: session.classroom_id ? String(session.classroom_id) : '',
+      latitude: session.latitude ?? '',
+      longitude: session.longitude ?? '',
+      radius_meters: session.radius_meters ?? '',
       room_name: session.room_name || '',
       note: session.note || '',
     })
@@ -497,6 +542,20 @@ export default function Sessions() {
     setEditModalTarget(null)
     setEditModalForm(initialModalForm)
     setEditModalErrors(emptyErrors)
+    setEditModalMessage('')
+  }
+
+  const handleEditModalClassroomChange = (classroomId) => {
+    const selectedClassroom = activeClassrooms.find((classroom) => classroom.id === parseInt(classroomId, 10))
+
+    setEditModalForm((prev) => ({
+      ...prev,
+      classroom_id: selectedClassroom ? String(selectedClassroom.id) : '',
+      room_name: selectedClassroom ? selectedClassroom.name : prev.room_name,
+      latitude: selectedClassroom ? selectedClassroom.gps_lat : prev.latitude,
+      longitude: selectedClassroom ? selectedClassroom.gps_lng : prev.longitude,
+      radius_meters: selectedClassroom ? selectedClassroom.radius_meters : prev.radius_meters,
+    }))
     setEditModalMessage('')
   }
 
@@ -512,6 +571,10 @@ export default function Sessions() {
       const updatedSession = {
         ...editModalTarget,
         ...response.data,
+        classroom_id: response.data.classroom_id ?? editModalForm.classroom_id,
+        latitude: response.data.latitude ?? editModalForm.latitude,
+        longitude: response.data.longitude ?? editModalForm.longitude,
+        radius_meters: response.data.radius_meters ?? editModalForm.radius_meters,
         room_name: response.data.room_name ?? editModalForm.room_name,
         note: response.data.note ?? editModalForm.note,
       }
@@ -1444,11 +1507,28 @@ export default function Sessions() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Phòng học</label>
-                <input
-                  value={editModalForm.room_name}
-                  onChange={(e) => handleEditModalChange('room_name', e.target.value)}
-                  placeholder="Phòng học"
-                />
+                <select
+                  value={editModalForm.classroom_id}
+                  onChange={(e) => handleEditModalClassroomChange(e.target.value)}
+                >
+                  <option value="">-- Chọn phòng học đã lưu --</option>
+                  {activeClassrooms.map((classroom) => (
+                    <option key={classroom.id} value={classroom.id}>
+                      {getClassroomOptionLabel(classroom)}
+                    </option>
+                  ))}
+                </select>
+                {!editModalForm.classroom_id && editModalForm.room_name && (
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    Phòng hiện tại: {editModalForm.room_name}
+                  </span>
+                )}
+                {(selectedEditModalRoom || editModalForm.latitude || editModalForm.longitude) && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+                    <div>Tọa độ: {editModalForm.latitude || '-'}, {editModalForm.longitude || '-'}</div>
+                    <div>Bán kính cho phép: {editModalForm.radius_meters || '-'} mét</div>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, gridColumn: '1 / -1' }}>

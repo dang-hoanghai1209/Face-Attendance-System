@@ -86,10 +86,16 @@ class SessionUpdate(BaseModel):
     subject: Optional[str] = None
     class_name: Optional[str] = None
     section_group: Optional[str] = None
+    classroom_id: Optional[int] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    radius_meters: Optional[int] = None
+    room_name: Optional[str] = None
     session_date: Optional[date] = None
     start_time: Optional[time] = None
     end_time: Optional[time] = None
     session_number: Optional[int] = None
+    note: Optional[str] = None
     created_by: Optional[str] = None
 
     @field_validator("class_name")

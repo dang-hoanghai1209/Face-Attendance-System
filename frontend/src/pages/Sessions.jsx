@@ -59,6 +59,7 @@ const formatDateStr = formatDateForDisplay
 
 const getSessionDateValue = (session) => session.session_date || session.date || ''
 const getSessionSubjectValue = (session) => session.subject_name || session.subject || ''
+const getSessionCodeValue = (session) => session.section_code || session.subject_code || ''
 
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
@@ -160,7 +161,7 @@ const groupSessionsBySection = (sessionsList) => {
       groups.set(key, {
         key,
         section_id: session.section_id ?? null,
-        section_code: session.section_code || session.subject_code || '',
+        section_code: getSessionCodeValue(session),
         subject_name: getSessionSubjectValue(session),
         section_group: session.section_group || '',
         class_name: session.class_name || '',
@@ -375,7 +376,7 @@ export default function Sessions() {
     return sessions.filter((s) =>
       String(s.id).includes(keyword) ||
       getSessionSubjectValue(s).toLowerCase().includes(keyword) ||
-      s.section_code?.toLowerCase().includes(keyword) ||
+      getSessionCodeValue(s).toLowerCase().includes(keyword) ||
       s.class_name?.toLowerCase().includes(keyword) ||
       s.section_group?.toLowerCase().includes(keyword) ||
       getSessionDateValue(s).includes(keyword)
@@ -821,7 +822,7 @@ export default function Sessions() {
 
         <div className="sessions-search-row">
           <input
-            placeholder={viewMode === 'grouped' ? "Tìm mã lớp HP, môn học, nhóm..." : "Tìm buổi, môn học, lớp..."}
+            placeholder={viewMode === 'grouped' ? "Tìm mã HP, môn học, nhóm..." : "Tìm buổi, môn học, lớp..."}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -840,7 +841,7 @@ export default function Sessions() {
             <table className="data-table">
               <thead>
                 <tr>
-                  {['Mã lớp HP', 'Môn học', 'Nhóm', 'Lớp', 'Tổng số buổi', 'Đang diễn ra', 'Sắp diễn ra', 'Đã kết thúc', 'Thao tác'].map((h) => (
+                  {['Mã HP', 'Môn học', 'Nhóm', 'Lớp', 'Tổng số buổi', 'Đang diễn ra', 'Sắp diễn ra', 'Đã kết thúc', 'Thao tác'].map((h) => (
                     <th key={h}>{h}</th>
                   ))}
                 </tr>
@@ -904,7 +905,7 @@ export default function Sessions() {
                       </span>
                     </div>
                     <div className="mobile-card-row">
-                      <span className="mobile-card-label">Mã lớp HP:</span>
+                      <span className="mobile-card-label">Mã HP:</span>
                       <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)' }}>
                         {group.section_code || '-'}
                       </span>

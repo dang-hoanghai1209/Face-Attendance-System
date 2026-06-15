@@ -803,32 +803,31 @@ export default function Sessions() {
       )}
 
       {/* Toolbar tìm kiếm & tải dữ liệu luôn hiển thị */}
-      <div className="toolbar" style={{ marginBottom: 16, flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <div className="sessions-controls">
+        <div className="sessions-view-toggle" role="group" aria-label="Chế độ xem buổi học">
           <button
-            className={viewMode === 'grouped' ? '' : 'secondary'}
+            className={viewMode === 'grouped' ? 'active' : ''}
             onClick={() => { setViewMode('grouped'); setSelectedGroupKey(null); }}
           >
-            Theo lớp học phần
+            Theo lớp HP
           </button>
           <button
-            className={viewMode === 'all' ? '' : 'secondary'}
+            className={viewMode === 'all' ? 'active' : ''}
             onClick={() => { setViewMode('all'); setSelectedGroupKey(null); }}
           >
-            Tất cả buổi học
+            Tất cả buổi
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <button className="secondary" onClick={loadSessions} disabled={loading}>
-            Tải lại dữ liệu
-          </button>
+        <div className="sessions-search-row">
           <input
-            placeholder={viewMode === 'grouped' ? "Tìm theo mã lớp HP, môn học, nhóm, lớp..." : "Tìm theo mã buổi, môn học, lớp hoặc ngày..."}
+            placeholder={viewMode === 'grouped' ? "Tìm mã lớp HP, môn học, nhóm..." : "Tìm buổi, môn học, lớp..."}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ minWidth: 280 }}
           />
+          <button className="secondary sessions-refresh-button" onClick={loadSessions} disabled={loading}>
+            Tải lại
+          </button>
         </div>
       </div>
 
@@ -898,7 +897,7 @@ export default function Sessions() {
               filteredGroupedSessions.map((group) => {
                 const metrics = getGroupMetrics(group);
                 return (
-                  <div key={group.key} className="mobile-card" style={{ border: '1px solid var(--bdr)' }}>
+                  <div key={group.key} className="mobile-card session-mobile-card" style={{ border: '1px solid var(--bdr)' }}>
                     <div className="mobile-card-header">
                       <span className="mobile-card-title" style={{ color: 'var(--teal)', fontWeight: 700 }}>
                         {group.section_code ? `${group.section_code} - ` : ''}{group.subject_name || '-'}
@@ -922,7 +921,7 @@ export default function Sessions() {
                         {group.class_name}
                       </span>
                     </div>
-                    <div className="mobile-card-row">
+                    <div className="mobile-card-row session-metrics-row">
                       <span className="mobile-card-label">Số buổi học:</span>
                       <span className="mobile-card-value">
                         {metrics.total} buổi ({metrics.ongoing} đang, {metrics.upcoming} sắp, {metrics.finished} xong)
@@ -1030,7 +1029,7 @@ export default function Sessions() {
               filteredSessions.map((session) => {
                 const status = getSessionStatus(session)
                 return (
-                  <div key={session.id} className="mobile-card">
+                  <div key={session.id} className="mobile-card session-mobile-card">
                     <div className="mobile-card-header">
                       <span className="mobile-card-title" style={{ color: 'var(--teal)', fontWeight: 700 }}>
                         {getSessionSubjectValue(session)}{session.session_number ? ` (Buổi ${session.session_number})` : ''}

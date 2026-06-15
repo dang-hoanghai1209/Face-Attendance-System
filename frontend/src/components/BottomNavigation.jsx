@@ -21,7 +21,7 @@ export default function BottomNavigation() {
             <rect x="3" y="16" width="7" height="5" />
           </svg>
         </span>
-        <span>Tổng quan</span>
+        <span>Tổng</span>
       </NavLink>
 
       {isAdmin && (
@@ -54,7 +54,7 @@ export default function BottomNavigation() {
               <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
           </span>
-          <span>Buổi học</span>
+          <span>Buổi</span>
         </NavLink>
       )}
 
@@ -82,7 +82,7 @@ export default function BottomNavigation() {
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
             </svg>
           </span>
-          <span>Học phần</span>
+          <span>HP</span>
         </NavLink>
       )}
 

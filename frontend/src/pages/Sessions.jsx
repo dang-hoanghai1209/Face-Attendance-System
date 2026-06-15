@@ -59,7 +59,14 @@ const formatDateStr = formatDateForDisplay
 
 const getSessionDateValue = (session) => session.session_date || session.date || ''
 const getSessionSubjectValue = (session) => session.subject_name || session.subject || ''
-const getSessionCodeValue = (session) => session.section_code || session.subject_code || ''
+const getSessionCodeValue = (session) => (
+  session.section_code ||
+  session.subject_code ||
+  session.course_section?.section_code ||
+  session.course_section?.subject_code ||
+  session.subject?.subject_code ||
+  ''
+)
 
 // ------------------------------------------------------------------ //
 // Helpers for Alerts

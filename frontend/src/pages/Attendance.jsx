@@ -106,6 +106,14 @@ const formatScanTime = (date) => {
   return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+const getLivenessStatusText = (result) => {
+  if (!result) return 'Kiểm tra khuôn mặt thật: Đang bật'
+  if (result.livenessPassed === false || result.status === 'spoof') {
+    return 'Kiểm tra khuôn mặt thật: Không đạt'
+  }
+  return 'Kiểm tra khuôn mặt thật: Đang bật'
+}
+
 export default function Attendance() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -590,8 +598,10 @@ export default function Attendance() {
       
       if (face.liveness_score !== undefined && face.liveness_score !== null) {
         details.push(`Khuôn mặt thật: ${(face.liveness_score * 100).toFixed(0)}%`)
+      } else if (face.liveness_passed === false || face.status === 'spoof') {
+        details.push('Khuôn mặt thật: không đạt')
       } else if (face.liveness_score === null) {
-        details.push('Kiểm tra khuôn mặt thật: tắt')
+        details.push('Khuôn mặt thật: đang bật')
       }
 
       const detailsText = details.length > 0 ? ` (${details.join(', ')})` : ''
@@ -640,6 +650,7 @@ export default function Attendance() {
         student: recognizedStudent,
         confidence,
         livenessScore: finalLivenessScore,
+        livenessPassed: checkinStatus === 'spoof' ? false : undefined,
         message: alertMsg,
       })
       if (showFeedback) setMessage(alertMsg)
@@ -678,6 +689,7 @@ export default function Attendance() {
         student: recognizedStudent,
         confidence,
         livenessScore: finalLivenessScore,
+        livenessPassed: mappedStatus === 'spoof' ? false : undefined,
         message: alertMsg,
       })
       if (showFeedback) setMessage(alertMsg)
@@ -817,6 +829,10 @@ export default function Attendance() {
       confidence,
     }
     if (options.mode) payload.mode = options.mode
+    if (options.liveness_passed !== undefined) payload.liveness_passed = options.liveness_passed
+    if (options.liveness_score !== undefined) payload.liveness_score = options.liveness_score
+    if (options.recognition_status) payload.recognition_status = options.recognition_status
+    if (options.image_path) payload.image_path = options.image_path
     // Gửi kèm thông số GPS nếu có sẵn
     if (gpsCoords) {
       payload.gps_lat = gpsCoords.lat
@@ -889,6 +905,8 @@ export default function Attendance() {
           results,
           face_count,
           liveness_score,
+          liveness_passed,
+          capture_path,
         } = recRes.data
         const recognizedStudent = student || null
         const recognizedCode = recognizedStudent?.student_code || student_code
@@ -901,7 +919,8 @@ export default function Attendance() {
           confidence,
           status,
           bbox: null,
-          liveness_score: liveness_score
+          liveness_score: liveness_score,
+          liveness_passed: liveness_passed,
         }] : [])
 
         if (activeResults.length > 0) {
@@ -917,6 +936,22 @@ export default function Attendance() {
             : liveness_score
 
           const alertMsg = buildFailureMessage('spoof')
+          try {
+            await postAttendanceAction(
+              recognizedCode || 'UNKNOWN',
+              finalScore,
+              'checkin',
+              {
+                mode: isAuto ? 'auto_scan' : undefined,
+                liveness_passed: false,
+                liveness_score: finalScore,
+                recognition_status: 'spoof',
+                image_path: capture_path,
+              },
+            )
+          } catch (err) {
+            handleCheckinError(err, recognizedCode, recognizedStudent, finalScore, finalScore, { isAuto })
+          }
           setResult({
             success: false,
             status: 'spoof',
@@ -924,6 +959,7 @@ export default function Attendance() {
             student: recognizedStudent,
             confidence: finalScore || 0,
             livenessScore: finalScore,
+            livenessPassed: false,
             message: alertMsg
           })
           if (shouldShowAutoFeedback(isAuto, recognizedCode, 'spoof')) {
@@ -943,6 +979,9 @@ export default function Attendance() {
         const finalLivenessScore = (primaryResult?.liveness_score !== undefined)
           ? primaryResult.liveness_score
           : liveness_score
+        const finalLivenessPassed = (primaryResult?.liveness_passed !== undefined)
+          ? primaryResult.liveness_passed
+          : liveness_passed
 
         const blockMessage = official_attendance_warning ||
           (recognizedStudent && !isOfficialStudent(recognizedStudent) ? OFFICIAL_BLOCK_MESSAGE : '')
@@ -955,7 +994,7 @@ export default function Attendance() {
           } else {
           const failureMessage = buildFailureMessage(failureStatus, blockMessage)
           setResult({ success: false, status: 'blocked', studentCode: recognizedCode, student: recognizedStudent,
-            confidence, livenessScore: finalLivenessScore, message: failureMessage })
+            confidence, livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed, message: failureMessage })
           if (shouldShowAutoFeedback(isAuto, recognizedCode, failureStatus)) {
             setMessage(failureMessage)
           }
@@ -973,7 +1012,13 @@ export default function Attendance() {
               recognizedCode,
               confidence,
               isAuto ? 'checkin' : action,
-              isAuto ? { mode: 'auto_scan' } : {},
+              {
+                ...(isAuto ? { mode: 'auto_scan' } : {}),
+                liveness_passed: finalLivenessPassed,
+                liveness_score: finalLivenessScore,
+                recognition_status: status,
+                image_path: capture_path,
+              },
             )
             const checkinData = checkinRes.data
             const isAlert = handleCheckinResult(checkinData, recognizedCode, recognizedStudent, confidence, finalLivenessScore, { isAuto })
@@ -987,7 +1032,7 @@ export default function Attendance() {
               ? alreadyCheckedInMessage
               : `Điểm danh thành công. Đã ghi nhận ${actionLabels[resultAction]} cho ${recognizedCode}.`
             setResult({ success: true, status: resultStatus, studentCode: recognizedCode, student: recognizedStudent, confidence, action: resultAction,
-              livenessScore: finalLivenessScore, message: successMessage })
+              livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed, message: successMessage })
             if (shouldShowAutoFeedback(isAuto, recognizedCode, resultStatus)) {
               setMessage(successMessage)
             }
@@ -1017,7 +1062,7 @@ export default function Attendance() {
           }
           const failureMessage = buildFailureMessage(status, recognitionMessages[status] || msg)
           setResult({ success: false, status, studentCode: recognizedCode || 'Không xác định', student: recognizedStudent,
-            confidence, livenessScore: finalLivenessScore, message: failureMessage })
+            confidence, livenessScore: finalLivenessScore, livenessPassed: finalLivenessPassed, message: failureMessage })
           if (showFeedback) setMessage(failureMessage)
           if (window.innerWidth < 768) setMobileStep(4)
         }
@@ -1430,11 +1475,7 @@ export default function Attendance() {
                   <div><strong>Lớp học phần:</strong> {selectedSession?.section_code || selectedSession?.class_name || '-'}</div>
                   <div><strong>Buổi học:</strong> {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</div>
                   <div><strong>Độ tương đồng:</strong> {formatConf(result.confidence)}</div>
-                  {result.livenessScore !== undefined && (
-                    <div>
-                      <strong>Điểm kiểm tra khuôn mặt thật:</strong> {result.livenessScore !== null ? `${(result.livenessScore * 100).toFixed(0)}%` : 'Không bật'}
-                    </div>
-                  )}
+                  <div><strong>{getLivenessStatusText(result)}</strong></div>
                   {result.action && <div><strong>Hình thức:</strong> Điểm danh {actionLabels[result.action]}</div>}
                 </div>
               )}
@@ -1650,9 +1691,7 @@ export default function Attendance() {
                     <p>Lớp học phần: {selectedSession?.section_code || selectedSession?.class_name || '-'}</p>
                     <p>Buổi học đang điểm danh: {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</p>
                     <p>Độ tin cậy: {formatConf(result.confidence)}</p>
-                    {result.livenessScore !== undefined && (
-                      <p>Điểm kiểm tra khuôn mặt thật: {result.livenessScore !== null ? `${(result.livenessScore * 100).toFixed(0)}%` : 'Không bật'}</p>
-                    )}
+                    <p>{getLivenessStatusText(result)}</p>
                     {result.success && result.action && (
                       <p>Trạng thái ghi nhận: Đã ghi nhận {actionLabels[result.action]}</p>
                     )}

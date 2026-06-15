@@ -35,6 +35,11 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.original_liveness_enabled = face_service.ENABLE_LIVENESS
         self.original_liveness_threshold = face_service.LIVENESS_THRESHOLD
         self.original_liveness_model = face_service.LIVENESS_MODEL
+        main.check_liveness = lambda _image: {
+            "liveness_passed": True,
+            "score": 0.99,
+            "label": "live",
+        }
 
     def tearDown(self):
         main.check_liveness = self.original_check_liveness
@@ -259,6 +264,7 @@ class RecognitionEndpointTests(unittest.TestCase):
             "confidence",
             "status",
             "liveness_score",
+            "liveness_passed",
             "bbox",
         }
         for item in result["results"]:
@@ -268,7 +274,8 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["class_name"], "63LFW")
         self.assertEqual(result["results"][0]["confidence"], 0.93)
         self.assertEqual(result["results"][0]["status"], "success")
-        self.assertIsNone(result["results"][0]["liveness_score"])
+        self.assertEqual(result["results"][0]["liveness_score"], 0.99)
+        self.assertTrue(result["results"][0]["liveness_passed"])
         self.assertEqual(result["results"][0]["bbox"], {"x": 10, "y": 20, "w": 30, "h": 40})
         self.assertEqual(result["results"][1]["status"], "uncertain")
         self.assertEqual(result["results"][1]["student_code"], "63123457")
@@ -304,7 +311,8 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertIsNone(result["results"][2]["student_code"])
         self.assertIsNone(result["results"][2]["full_name"])
         self.assertIsNone(result["results"][2]["class_name"])
-        self.assertIsNone(result["results"][2]["liveness_score"])
+        self.assertEqual(result["results"][2]["liveness_score"], 0.99)
+        self.assertTrue(result["results"][2]["liveness_passed"])
         self.assertEqual(result["results"][2]["bbox"], {"x": 3, "y": 3, "w": 10, "h": 10})
 
     def test_invalid_liveness_threshold_env_falls_back_without_import_crash(self):

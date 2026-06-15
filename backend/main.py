@@ -302,7 +302,8 @@ def _recognize_uploaded_face_multi(
             "message": f"Không đạt kiểm tra khuôn mặt thật: {exc}",
         }
     liveness_score = liveness_result.get("score")
-    if not liveness_result.get("liveness_passed", False):
+    liveness_passed = bool(liveness_result.get("liveness_passed", False))
+    if not liveness_passed:
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
         message = liveness_result.get("message") or "Phát hiện giả mạo khuôn mặt"
         audit_id = None
@@ -335,6 +336,7 @@ def _recognize_uploaded_face_multi(
             "confidence": liveness_score if liveness_score is not None else -1.0,
             "confidence_percent": "0%" if liveness_score is None else f"{max(liveness_score, 0.0):.0%}",
             "liveness_score": liveness_score,
+            "liveness_passed": False,
             "official_attendance_allowed": False,
             "official_attendance_warning": message,
             "official_attendance_warning_code": "spoof",
@@ -367,6 +369,8 @@ def _recognize_uploaded_face_multi(
                     "student": None,
                     "confidence": -1.0,
                     "confidence_percent": "0%",
+                    "liveness_score": liveness_score,
+                    "liveness_passed": liveness_passed,
                     "official_attendance_allowed": False,
                     "official_attendance_warning": None,
                     "processing_time_ms": processing_time_ms,
@@ -430,6 +434,7 @@ def _recognize_uploaded_face_multi(
             "confidence": -1.0,
             "confidence_percent": "0%",
             "liveness_score": liveness_score,
+            "liveness_passed": liveness_passed,
             "official_attendance_allowed": False,
             "official_attendance_warning": None,
             "processing_time_ms": processing_time_ms,
@@ -503,6 +508,7 @@ def _recognize_uploaded_face_multi(
                     "confidence": similarity,
                     "confidence_percent": f"{max(similarity, 0.0):.0%}",
                     "liveness_score": liveness_score,
+                    "liveness_passed": liveness_passed,
                     "bbox": face.get("bbox"),
                     "official_attendance_allowed": official_warning is None and recognition_status in {"success", "uncertain"},
                     "official_attendance_warning": official_warning,

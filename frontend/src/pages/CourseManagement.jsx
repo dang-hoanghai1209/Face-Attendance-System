@@ -339,12 +339,17 @@ export default function CourseManagement() {
   const [schedForm, setSchedForm] = useState({ section_id: '', room_name: '', classroom_id: '', session_date: '', start_time: '', end_time: '', note: '', weeks: 1 })
   const [schedLoading, setSchedLoading] = useState(false)
 
-  const handleRoomNameChange = (name) => {
-    const matched = classrooms.find(cr => cr.name.toLowerCase() === name.trim().toLowerCase() && cr.is_active)
+  const getClassroomOptionLabel = (classroom) => {
+    if (!classroom) return ''
+    return classroom.building ? `${classroom.building} - ${classroom.name}` : classroom.name
+  }
+
+  const handleClassroomChange = (classroomId) => {
+    const matched = classrooms.find(cr => cr.id === parseInt(classroomId, 10) && cr.is_active)
     setSchedForm(prev => ({
       ...prev,
-      room_name: name,
-      classroom_id: matched ? matched.id : ''
+      classroom_id: matched ? String(matched.id) : '',
+      room_name: matched ? matched.name : ''
     }))
   }
 
@@ -355,7 +360,7 @@ export default function CourseManagement() {
 
   const handleScheduleSession = async () => {
     if (!schedForm.section_id || !schedForm.classroom_id || !schedForm.session_date || !schedForm.start_time || !schedForm.end_time) {
-      notify('Vui lòng điền hoặc chọn đúng tên phòng học đã được cấu hình GPS và điền đầy đủ các thông tin.', 'error')
+      notify('Vui lòng chọn phòng học đã lưu và điền đầy đủ các thông tin.', 'error')
       return
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(schedForm.session_date)) {
@@ -1097,29 +1102,22 @@ export default function CourseManagement() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <label style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-                  Phòng học điểm danh
+                  Phòng học
                 </label>
-                <input
-                  type="text"
-                  list="sched-classroom-options"
-                  placeholder="Nhập tên phòng học (vd: G6-101)"
-                  value={schedForm.room_name}
-                  onChange={(e) => handleRoomNameChange(e.target.value)}
-                />
-                <datalist id="sched-classroom-options">
+                <select
+                  value={schedForm.classroom_id}
+                  onChange={(e) => handleClassroomChange(e.target.value)}
+                >
+                  <option value="">-- Chọn phòng học đã lưu --</option>
                   {classrooms.filter(cr => cr.is_active).map((cr) => (
-                    <option key={cr.id} value={cr.name}>
-                      {cr.building ? `${cr.building} - ` : ''}Bán kính {cr.radius_meters}m
+                    <option key={cr.id} value={cr.id}>
+                      {getClassroomOptionLabel(cr)}
                     </option>
                   ))}
-                </datalist>
+                </select>
                 {selectedRoom ? (
                   <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <span>📍 GPS: {selectedRoom.gps_lat}, {selectedRoom.gps_lng} (Bán kính {selectedRoom.radius_meters}m)</span>
-                  </div>
-                ) : schedForm.room_name ? (
-                  <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 2 }}>
-                    ⚠️ Phòng học chưa được đăng ký hoặc tọa độ GPS chưa sẵn sàng.
                   </div>
                 ) : null}
               </div>

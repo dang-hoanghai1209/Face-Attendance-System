@@ -1,4 +1,5 @@
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from database import Base
@@ -14,6 +15,7 @@ class CourseSection(Base):
     class_name = Column(String(50), nullable=True)
     section_group = Column(String(30), nullable=True)
     subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False, index=True)
+    subject = relationship("Subject", foreign_keys=[subject_id])
     semester = Column(String(30))
     academic_year = Column(String(30))
     lecturer_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)

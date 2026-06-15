@@ -14,7 +14,13 @@ from models.course_section import CourseSection
 from models.session import Session as ClassSession
 from models.subject import Subject
 from routes.course_sections import CourseSectionCreate, create_course_section, delete_course_section
-from routes.sessions import SessionFromSectionCreate, create_session_from_section, SessionUpdate, update_session
+from routes.sessions import (
+    SessionFromSectionCreate,
+    SessionResponse,
+    SessionUpdate,
+    create_session_from_section,
+    update_session,
+)
 
 
 class CourseSectionClassNameTests(unittest.TestCase):
@@ -102,6 +108,55 @@ class CourseSectionClassNameTests(unittest.TestCase):
         self.assertEqual(session.class_name, "64CNTT")
         self.assertNotEqual(session.class_name, "INS-631")  # Verify section_code is not converted to class_name
         self.assertEqual(session.section_id, section["id"])
+
+    def test_create_session_from_course_section_response_exposes_subject_code(self):
+        subject = Subject(
+            subject_code="INS604",
+            subject_name="Cơ sở dữ liệu",
+            credits=3,
+            department="CNTT",
+        )
+        self.db.add(subject)
+        self.db.commit()
+        self.db.refresh(subject)
+
+        section = create_course_section(
+            CourseSectionCreate(
+                section_code="INS604",
+                class_name="63CNTT",
+                section_group="02",
+                subject_id=subject.id,
+                semester="2026-1",
+                academic_year="2025-2026",
+                lecturer_name="Giảng viên B",
+                status="open",
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        session = create_session_from_section(
+            SessionFromSectionCreate(
+                section_id=section["id"],
+                classroom_id=self.classroom.id,
+                session_date=date(2026, 6, 15),
+                start_time=time(7, 0),
+                end_time=time(9, 0),
+                weeks=8,
+            ),
+            _current_user=None,
+            db=self.db,
+        )
+
+        response = SessionResponse.model_validate(session)
+
+        self.assertEqual(session.section_id, section["id"])
+        self.assertEqual(response.section_code, "INS604")
+        self.assertEqual(response.subject_code, "INS604")
+        self.assertEqual(response.subject_name, "Cơ sở dữ liệu")
+        self.assertEqual(response.section_group, "02")
+        self.assertEqual(response.class_name, "63CNTT")
+        self.assertEqual(response.course_section["section_code"], "INS604")
 
     def test_create_session_from_section_skips_week_9_holiday(self):
         section = create_course_section(

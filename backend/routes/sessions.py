@@ -1,9 +1,9 @@
 from datetime import date, time, timedelta, datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from models.attendance import Attendance
@@ -106,9 +106,13 @@ class SessionUpdate(BaseModel):
 class SessionResponse(BaseModel):
     id: int
     subject: Optional[str] = None
+    subject_name: Optional[str] = None
+    subject_code: Optional[str] = None
     class_name: Optional[str] = None
     section_group: Optional[str] = None
     section_id: Optional[int] = None
+    section_code: Optional[str] = None
+    course_section: Optional[Dict[str, Any]] = None
     classroom_id: Optional[int] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
@@ -128,21 +132,39 @@ class SessionResponse(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def resolve_section_group(cls, data):
+    def resolve_section_fields(cls, data):
         if isinstance(data, dict):
             return data
-        
+
         # data is a ClassSession SQLAlchemy model object.
         # Construct dict of its columns
         d = {}
         for col in data.__table__.columns:
             d[col.name] = getattr(data, col.name)
-            
+
+        section = getattr(data, "section", None)
+        subject = getattr(section, "subject", None) if section else None
+
         group = d.get("section_group")
-        if (not group or not group.strip()) and data.section_id:
-            # lazy load course section
-            if getattr(data, "section", None):
-                d["section_group"] = data.section.section_group
+        if (not group or not group.strip()) and section:
+            d["section_group"] = section.section_group
+
+        if section:
+            section_code = (section.section_code or "").strip()
+            subject_code = (subject.subject_code or "").strip() if subject else ""
+            d["section_code"] = section_code or subject_code or None
+            d["subject_code"] = subject_code or None
+            d["subject_name"] = (subject.subject_name if subject else None) or d.get("subject")
+            d["course_section"] = {
+                "id": section.id,
+                "section_code": section_code or None,
+                "section_group": section.section_group,
+                "class_name": section.class_name,
+                "subject_code": subject_code or None,
+                "subject_name": subject.subject_name if subject else None,
+            }
+        else:
+            d["subject_name"] = d.get("subject")
         return d
 
 
@@ -170,7 +192,12 @@ class SessionFromSectionCreate(BaseModel):
 
 @router.get("/", response_model=List[SessionResponse])
 def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(ClassSession).order_by(ClassSession.session_date.desc()).all()
+    return (
+        db.query(ClassSession)
+        .options(joinedload(ClassSession.section).joinedload(CourseSection.subject))
+        .order_by(ClassSession.session_date.desc())
+        .all()
+    )
 
 
 @router.post("/", response_model=SessionResponse)
@@ -267,6 +294,7 @@ def create_session_from_section(
     db.commit()
     for s in created_sessions:
         db.refresh(s)
+        _ = s.section.subject if s.section else None
 
     return created_sessions[0]
 

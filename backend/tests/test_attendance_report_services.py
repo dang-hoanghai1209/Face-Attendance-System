@@ -12,7 +12,7 @@ from models.attendance_scan import AttendanceScan
 from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.enrollment import Enrollment
-from models.session import DEMO_MIN_GPS_RADIUS_METERS, Session as ClassSession
+from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
 from services import attendance_service, report_service
@@ -478,7 +478,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(response["data"]["gps_accuracy"], 5.5)
         self.assertEqual(response["data"]["distance_meters"], 0.0)
         self.assertEqual(response["distance_meters"], 0.0)
-        self.assertEqual(response["allowed_radius_meters"], max(classroom.radius_meters, DEMO_MIN_GPS_RADIUS_METERS))
+        self.assertEqual(response["allowed_radius_meters"], classroom.radius_meters)
         self.assertIsNotNone(response["check_in_time"])
 
     def test_section_session_rejects_gps_out_of_range(self):

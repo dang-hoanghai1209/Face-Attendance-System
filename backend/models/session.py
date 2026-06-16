@@ -7,7 +7,6 @@ from models.classroom import Classroom  # noqa: F401
 from models.course_section import CourseSection  # noqa: F401
 
 DEFAULT_GPS_RADIUS_METERS = 30
-DEMO_MIN_GPS_RADIUS_METERS = 50
 
 class Session(Base):
     __tablename__ = "sessions"

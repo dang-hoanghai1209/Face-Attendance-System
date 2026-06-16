@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 const DEFAULT_GPS_RADIUS_METERS = 30
+const DEMO_MIN_GPS_RADIUS_METERS = 50
 
 // Công thức Haversine tính khoảng cách giữa hai điểm tọa độ (mét)
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -87,7 +88,9 @@ export default function GPSStatus({ targetLocation, onLocationChange }) {
         )
       : null
 
-  const allowedRadius = targetLocation?.radius_meters || DEFAULT_GPS_RADIUS_METERS
+  const configuredRadius = targetLocation?.radius_meters || DEFAULT_GPS_RADIUS_METERS
+  const allowedRadius =
+    targetLocation?.allowed_radius_meters || Math.max(configuredRadius, DEMO_MIN_GPS_RADIUS_METERS)
 
   // Xác định trạng thái hiển thị
   let statusText = 'Đang lấy vị trí...'
@@ -174,8 +177,13 @@ export default function GPSStatus({ targetLocation, onLocationChange }) {
                   <span style={{ color: 'var(--muted)' }}>Bán kính cho phép:</span>
                   <span style={{ color: 'var(--white2)' }}>{allowedRadius} mét</span>
                 </div>
+                )}
+              {allowedRadius >= DEMO_MIN_GPS_RADIUS_METERS && configuredRadius < DEMO_MIN_GPS_RADIUS_METERS && (
+                <div style={{ color: 'var(--muted)', fontSize: '12px', marginTop: '6px', lineHeight: 1.4 }}>
+                  Bán kính GPS demo: tối thiểu 50m do laptop có thể sai số vị trí cao.
+                </div>
               )}
-            </div>
+              </div>
           )}
         </div>
       )}

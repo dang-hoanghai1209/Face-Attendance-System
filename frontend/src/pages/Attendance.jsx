@@ -14,6 +14,11 @@ import GPSStatus from '../components/GPSStatus'
 import AttendanceCountdown from '../components/AttendanceCountdown'
 
 const DEFAULT_GPS_RADIUS_METERS = 30
+const DEMO_MIN_GPS_RADIUS_METERS = 50
+
+const resolveAllowedGpsRadius = (configuredRadius) => (
+  Math.max(configuredRadius || DEFAULT_GPS_RADIUS_METERS, DEMO_MIN_GPS_RADIUS_METERS)
+)
 
 const actionOptions = [
   { value: 'checkin',  label: 'Vào lớp' },
@@ -182,7 +187,8 @@ export default function Attendance() {
         name: selectedSession.room_name || 'Phòng học (Session GPS)',
         gps_lat: selectedSession.latitude,
         gps_lng: selectedSession.longitude,
-        radius_meters: selectedSession.radius_meters || DEFAULT_GPS_RADIUS_METERS
+        radius_meters: selectedSession.radius_meters || DEFAULT_GPS_RADIUS_METERS,
+        allowed_radius_meters: selectedSession.allowed_radius_meters || resolveAllowedGpsRadius(selectedSession.radius_meters)
       }
     }
 
@@ -194,7 +200,8 @@ export default function Attendance() {
         name: selectedSession.classroom_name || 'Phòng học',
         gps_lat: selectedSession.classroom_gps_lat,
         gps_lng: selectedSession.classroom_gps_lng,
-        radius_meters: selectedSession.radius_meters || DEFAULT_GPS_RADIUS_METERS
+        radius_meters: selectedSession.radius_meters || DEFAULT_GPS_RADIUS_METERS,
+        allowed_radius_meters: selectedSession.allowed_radius_meters || resolveAllowedGpsRadius(selectedSession.radius_meters)
       }
     }
 
@@ -209,7 +216,8 @@ export default function Attendance() {
         name: classroom.name || 'Phòng học',
         gps_lat: classroom.gps_lat,
         gps_lng: classroom.gps_lng,
-        radius_meters: classroom.radius_meters || DEFAULT_GPS_RADIUS_METERS
+        radius_meters: classroom.radius_meters || DEFAULT_GPS_RADIUS_METERS,
+        allowed_radius_meters: classroom.allowed_radius_meters || resolveAllowedGpsRadius(classroom.radius_meters)
       }
     }
 
@@ -219,7 +227,8 @@ export default function Attendance() {
       name: selectedSession.room_name || selectedSession.classroom_name || 'Chưa xác định phòng học',
       gps_lat: null,
       gps_lng: null,
-      radius_meters: selectedSession.radius_meters || null
+      radius_meters: selectedSession.radius_meters || null,
+      allowed_radius_meters: selectedSession.allowed_radius_meters || resolveAllowedGpsRadius(selectedSession.radius_meters)
     }
   }, [classrooms, selectedSession])
 

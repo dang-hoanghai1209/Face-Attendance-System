@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from models.attendance import Attendance
 from models.attendance_scan import AttendanceScan
 from models.enrollment import Enrollment
-from models.session import DEFAULT_GPS_RADIUS_METERS, Session as ClassSession
+from models.session import DEMO_MIN_GPS_RADIUS_METERS, DEFAULT_GPS_RADIUS_METERS, Session as ClassSession
 from models.student import Student
 from face_service import THRESHOLD_UNCERTAIN
 from services.security_alert_service import create_alert
@@ -224,11 +224,12 @@ def validate_gps(db: Session, session: ClassSession, gps_lat=None, gps_lng=None,
     if gps_lat is None or gps_lng is None:
         attendance_error(400, "gps_missing", "Vui lòng cho phép truy cập vị trí GPS để điểm danh.")
 
-    allowed_radius_meters = (
+    configured_radius = (
         session.radius_meters
         if session.radius_meters is not None
         else DEFAULT_GPS_RADIUS_METERS
     )
+    allowed_radius_meters = max(configured_radius, DEMO_MIN_GPS_RADIUS_METERS)
     distance_meters = haversine_distance_meters(gps_lat, gps_lng, session.latitude, session.longitude)
     if distance_meters > allowed_radius_meters:
         attendance_error(
@@ -300,7 +301,12 @@ def get_session_record(db: Session, student_id: int, session_id: int):
 def allowed_radius_for_session(db: Session, session: ClassSession):
     if not session:
         return None
-    return session.radius_meters
+    configured_radius = (
+        session.radius_meters
+        if session.radius_meters is not None
+        else DEFAULT_GPS_RADIUS_METERS
+    )
+    return max(configured_radius, DEMO_MIN_GPS_RADIUS_METERS)
 
 
 def next_scan_index(db: Session, record: Attendance):

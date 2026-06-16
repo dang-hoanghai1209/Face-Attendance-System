@@ -371,11 +371,6 @@ export default function Students() {
                     <span className={`badge ${SOURCE_BADGES[effectiveSource] || 'danger'}`}>
                       {SOURCE_LABELS[effectiveSource] || effectiveSource}
                     </span>
-                    {group === 'evaluation' && (
-                      <span className="badge danger" style={{ marginLeft:6 }}>
-                        Không dùng cho điểm danh thật
-                      </span>
-                    )}
                     {group === 'demo' && (
                       <span className="badge warning" style={{ marginLeft:6 }}>
                         Demo/test
@@ -444,12 +439,6 @@ export default function Students() {
                     {SOURCE_LABELS[effectiveSource] || effectiveSource}
                   </span>
                 </div>
-                {group === 'evaluation' && (
-                  <div className="mobile-card-row">
-                    <span className="mobile-card-label">Ghi chú:</span>
-                    <span className="badge danger">Không dùng cho điểm danh thật</span>
-                  </div>
-                )}
                 {group === 'demo' && (
                   <div className="mobile-card-row">
                     <span className="mobile-card-label">Ghi chú:</span>

@@ -1,29 +1,48 @@
 import { useEffect, useState } from 'react'
 
-// Hàm chuyển ngày và giờ của buổi học thành đối tượng Date cục bộ
+const EARLY_CHECKIN_MINUTES = 15
+const LATE_CHECKIN_MINUTES = 10
+
 function getSessionTimes(sessionDate, startTimeStr) {
   if (!sessionDate || !startTimeStr) return null
-  
-  const timeParts = startTimeStr.split(':')
-  const hours = parseInt(timeParts[0], 10)
-  const minutes = parseInt(timeParts[1], 10)
-  const seconds = timeParts[2] ? parseInt(timeParts[2], 10) : 0
-  
-  const start = new Date(sessionDate)
-  start.setHours(hours, minutes, seconds, 0)
-  
-  const deadline = new Date(start.getTime() + 15 * 60 * 1000) // 15 phút sau giờ bắt đầu
-  
-  return { start, deadline }
+
+  const dateParts = String(sessionDate).split('-').map(Number)
+  const timeParts = String(startTimeStr).split(':').map(Number)
+  if (dateParts.length !== 3 || timeParts.length < 2) return null
+
+  const [year, month, day] = dateParts
+  const [hours, minutes, seconds = 0] = timeParts
+  const start = new Date(year, month - 1, day, hours || 0, minutes || 0, seconds || 0, 0)
+  const openAt = new Date(start.getTime() - EARLY_CHECKIN_MINUTES * 60 * 1000)
+  const closeAt = new Date(start.getTime() + LATE_CHECKIN_MINUTES * 60 * 1000)
+
+  return { start, openAt, closeAt }
+}
+
+function formatClock(date) {
+  if (!date) return '--:--'
+  return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDuration(ms) {
+  const safeMs = Math.max(0, ms)
+  const hours = Math.floor(safeMs / (3600 * 1000))
+  const minutes = Math.floor((safeMs % (3600 * 1000)) / (60 * 1000))
+  const seconds = Math.floor((safeMs % (60 * 1000)) / 1000)
+
+  if (hours > 0) return `${hours}g ${minutes}p ${seconds}s`
+  return `${minutes}p ${seconds}s`
 }
 
 export default function AttendanceCountdown({ sessionDate, startTime, onStatusChange }) {
   const [timeLeft, setTimeLeft] = useState('')
-  const [status, setStatus] = useState('not_started') // not_started, open, closed
+  const [status, setStatus] = useState('not_started')
+  const [sessionTimes, setSessionTimes] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!sessionDate || !startTime) {
+      setSessionTimes(null)
       setLoading(false)
       return
     }
@@ -33,44 +52,32 @@ export default function AttendanceCountdown({ sessionDate, startTime, onStatusCh
       if (!times) return
 
       const now = new Date()
-      const { start, deadline } = times
+      const { openAt, closeAt } = times
 
       let currentStatus = 'not_started'
       let displayText = ''
 
-      if (now < start) {
+      if (now < openAt) {
         currentStatus = 'not_started'
-        const diffMs = start - now
-        const diffHrs = Math.floor(diffMs / (3600 * 1000))
-        const diffMins = Math.floor((diffMs % (3600 * 1000)) / (60 * 1000))
-        const diffSecs = Math.floor((diffMs % (60 * 1000)) / 1000)
-        
-        if (diffHrs > 0) {
-          displayText = `Còn ${diffHrs}g ${diffMins}p ${diffSecs}s để bắt đầu học`
-        } else {
-          displayText = `Còn ${diffMins}p ${diffSecs}s để bắt đầu học`
-        }
-      } else if (now >= start && now <= deadline) {
+        displayText = `Còn ${formatDuration(openAt - now)} để mở điểm danh`
+      } else if (now <= closeAt) {
         currentStatus = 'open'
-        const diffMs = deadline - now
-        const diffMins = Math.floor(diffMs / (60 * 1000))
-        const diffSecs = Math.floor((diffMs % (60 * 1000)) / 1000)
-        displayText = `Điểm danh đóng sau: ${diffMins} phút ${diffSecs} giây`
+        displayText = 'Đang trong thời gian điểm danh'
       } else {
         currentStatus = 'closed'
-        displayText = 'Hết thời gian điểm danh'
+        displayText = 'Đã kết thúc điểm danh'
       }
 
       setStatus(currentStatus)
       setTimeLeft(displayText)
+      setSessionTimes(times)
       setLoading(false)
-      
+
       if (onStatusChange) {
         onStatusChange(currentStatus)
       }
     }
 
-    // Chạy kiểm tra ngay lập tức
     updateTimer()
 
     const intervalId = setInterval(updateTimer, 1000)
@@ -93,7 +100,6 @@ export default function AttendanceCountdown({ sessionDate, startTime, onStatusCh
     )
   }
 
-  // Tùy biến kiểu hiển thị dựa trên trạng thái
   let bg = 'var(--card)'
   let border = 'var(--bdr)'
   let color = 'var(--white)'
@@ -104,13 +110,13 @@ export default function AttendanceCountdown({ sessionDate, startTime, onStatusCh
     bg = 'rgba(0,201,167,.06)'
     border = 'rgba(0,201,167,.2)'
     color = 'var(--teal)'
-    badgeText = 'Đang mở điểm danh'
+    badgeText = 'Đang điểm danh'
     badgeClass = 'success'
   } else if (status === 'closed') {
     bg = 'rgba(244,63,94,.04)'
     border = 'rgba(244,63,94,.15)'
     color = 'var(--red)'
-    badgeText = 'Đã quá giờ điểm danh'
+    badgeText = 'Đã kết thúc'
     badgeClass = 'danger'
   }
 
@@ -126,7 +132,7 @@ export default function AttendanceCountdown({ sessionDate, startTime, onStatusCh
       gap: '8px',
       animation: 'fadeUp 0.35s ease both'
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--white2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           Thời gian điểm danh
         </span>
@@ -135,12 +141,16 @@ export default function AttendanceCountdown({ sessionDate, startTime, onStatusCh
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         <div style={{ fontSize: '16px', fontWeight: '800', color: color }}>
           {timeLeft}
         </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 12px', fontSize: '12px', color: 'var(--white2)' }}>
+          <span>Mở điểm danh: {formatClock(sessionTimes?.openAt)}</span>
+          <span>Kết thúc điểm danh: {formatClock(sessionTimes?.closeAt)}</span>
+        </div>
         <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-          Quy định: Điểm danh hợp lệ chỉ diễn ra trong vòng 15 phút đầu kể từ giờ bắt đầu học ({startTime?.slice(0, 5)}).
+          Quy định: Điểm danh mở trước giờ học 15 phút và kết thúc sau giờ bắt đầu 10 phút.
         </div>
       </div>
     </div>

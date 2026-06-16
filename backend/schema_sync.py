@@ -1,7 +1,5 @@
 from sqlalchemy import inspect, text
 
-from models.session import DEFAULT_GPS_RADIUS_METERS
-
 
 def _get_columns(inspector, table_name):
     return {column["name"] for column in inspector.get_columns(table_name)}
@@ -500,9 +498,7 @@ def sync_schema(engine):
             if "longitude" not in columns:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN longitude FLOAT"))
             if "radius_meters" not in columns:
-                connection.execute(
-                    text(f"ALTER TABLE sessions ADD COLUMN radius_meters INTEGER DEFAULT {DEFAULT_GPS_RADIUS_METERS}")
-                )
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN radius_meters INTEGER DEFAULT 50"))
             if "room_name" not in columns:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN room_name VARCHAR(100)"))
             if "session_number" not in columns:
@@ -513,9 +509,7 @@ def sync_schema(engine):
 
             connection.execute(text("UPDATE sessions SET start_time = '07:00:00' WHERE start_time IS NULL"))
             connection.execute(text("UPDATE sessions SET end_time = '09:00:00' WHERE end_time IS NULL"))
-            connection.execute(
-                text(f"UPDATE sessions SET radius_meters = {DEFAULT_GPS_RADIUS_METERS} WHERE radius_meters IS NULL")
-            )
+            connection.execute(text("UPDATE sessions SET radius_meters = 50 WHERE radius_meters IS NULL"))
 
         if "course_sections" in tables:
             columns = _get_columns(inspector, "course_sections")

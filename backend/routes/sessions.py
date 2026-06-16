@@ -11,7 +11,7 @@ from models.attendance_scan import AttendanceScan
 from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.recognition_attempt import RecognitionAttempt
-from models.session import DEFAULT_GPS_RADIUS_METERS, Session as ClassSession
+from models.session import Session as ClassSession
 from models.subject import Subject
 from services.auth_service import get_current_user, require_admin
 from services.class_service import VALID_CLASS_SET
@@ -58,7 +58,7 @@ class SessionCreate(BaseModel):
     section_group: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
-    radius_meters: Optional[int] = DEFAULT_GPS_RADIUS_METERS
+    radius_meters: Optional[int] = 50
     room_name: Optional[str] = None
     session_date: date
     start_time: time

@@ -4,8 +4,6 @@ import api from '../../api/axios.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 import { VALID_CLASSES } from '../constants/classes.js'
 
-const DEFAULT_GPS_RADIUS_METERS = 30
-
 const formatDateForDisplay = (isoDate) => {
   if (!isoDate) return ''
   const parts = isoDate.split('-')
@@ -31,7 +29,7 @@ export default function CourseManagement() {
   // 1. STATE & LOGIC CHO PHÒNG HỌC (CLASSROOMS)
   // ════════════════════════════════════════════════════════════════
   const [classrooms, setClassrooms] = useState([])
-  const [crForm, setCrForm] = useState({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: DEFAULT_GPS_RADIUS_METERS, is_active: true })
+  const [crForm, setCrForm] = useState({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: 15, is_active: true })
   const [crEditingId, setCrEditingId] = useState(null)
   const [crLoading, setCrLoading] = useState(false)
 
@@ -66,7 +64,7 @@ export default function CourseManagement() {
         await api.post('/classrooms/', payload)
         notify('Thêm phòng học thành công.')
       }
-      setCrForm({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: DEFAULT_GPS_RADIUS_METERS, is_active: true })
+      setCrForm({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: 15, is_active: true })
       setCrEditingId(null)
       fetchClassrooms()
     } catch (e) {
@@ -97,7 +95,7 @@ export default function CourseManagement() {
       notify('Đã xóa phòng học.')
       if (crEditingId === id) {
         setCrEditingId(null)
-        setCrForm({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: DEFAULT_GPS_RADIUS_METERS, is_active: true })
+        setCrForm({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: 15, is_active: true })
       }
       fetchClassrooms()
     } catch (e) {
@@ -526,7 +524,7 @@ export default function CourseManagement() {
                   className="secondary"
                   onClick={() => {
                     setCrEditingId(null)
-                    setCrForm({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: DEFAULT_GPS_RADIUS_METERS, is_active: true })
+                    setCrForm({ name: '', building: '', gps_lat: '', gps_lng: '', radius_meters: 15, is_active: true })
                   }}
                 >
                   Hủy

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+const DEFAULT_GPS_RADIUS_METERS = 30
+
 // Công thức Haversine tính khoảng cách giữa hai điểm tọa độ (mét)
 function calculateDistance(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1 || !lat2 || !lon2) return null
@@ -85,7 +87,7 @@ export default function GPSStatus({ targetLocation, onLocationChange }) {
         )
       : null
 
-  const allowedRadius = targetLocation?.radius_meters || 15
+  const allowedRadius = targetLocation?.radius_meters || DEFAULT_GPS_RADIUS_METERS
 
   // Xác định trạng thái hiển thị
   let statusText = 'Đang lấy vị trí...'

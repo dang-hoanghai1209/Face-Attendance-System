@@ -6,6 +6,8 @@ from database import Base
 from models.classroom import Classroom  # noqa: F401
 from models.course_section import CourseSection  # noqa: F401
 
+DEFAULT_GPS_RADIUS_METERS = 30
+
 class Session(Base):
     __tablename__ = "sessions"
 
@@ -19,7 +21,7 @@ class Session(Base):
     classroom_id = Column(Integer, ForeignKey("classrooms.id"), nullable=True, index=True)
     latitude = Column(Float)
     longitude = Column(Float)
-    radius_meters = Column(Integer, default=50)
+    radius_meters = Column(Integer, default=DEFAULT_GPS_RADIUS_METERS)
     room_name = Column(String(100))
     session_date = Column(Date, nullable=False)
     start_time = Column(Time)

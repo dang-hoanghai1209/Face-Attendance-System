@@ -13,6 +13,8 @@ import {
 import GPSStatus from '../components/GPSStatus'
 import AttendanceCountdown from '../components/AttendanceCountdown'
 
+const DEFAULT_GPS_RADIUS_METERS = 30
+
 const actionOptions = [
   { value: 'checkin',  label: 'Vào lớp' },
   { value: 'checkout', label: 'Ra về'   },
@@ -180,7 +182,7 @@ export default function Attendance() {
         name: selectedSession.room_name || 'Phòng học (Session GPS)',
         gps_lat: selectedSession.latitude,
         gps_lng: selectedSession.longitude,
-        radius_meters: selectedSession.radius_meters || 15
+        radius_meters: selectedSession.radius_meters || DEFAULT_GPS_RADIUS_METERS
       }
     }
 
@@ -192,7 +194,7 @@ export default function Attendance() {
         name: selectedSession.classroom_name || 'Phòng học',
         gps_lat: selectedSession.classroom_gps_lat,
         gps_lng: selectedSession.classroom_gps_lng,
-        radius_meters: selectedSession.radius_meters || 15
+        radius_meters: selectedSession.radius_meters || DEFAULT_GPS_RADIUS_METERS
       }
     }
 
@@ -207,7 +209,7 @@ export default function Attendance() {
         name: classroom.name || 'Phòng học',
         gps_lat: classroom.gps_lat,
         gps_lng: classroom.gps_lng,
-        radius_meters: classroom.radius_meters || 15
+        radius_meters: classroom.radius_meters || DEFAULT_GPS_RADIUS_METERS
       }
     }
 

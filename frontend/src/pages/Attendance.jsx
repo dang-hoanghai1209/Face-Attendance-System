@@ -123,8 +123,8 @@ const getLivenessThresholdText = (threshold) =>
 export default function Attendance() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
-  const canDeleteAttendance = isLecturerOrAdmin
+  const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
+  const canDeleteAttendance = isTeacherOrAdmin
   const videoRef  = useRef(null)
   const canvasRef = useRef(null)
   const overlayCanvasRef = useRef(null)

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import api from '../../api/axios.js'
+import { useAuth } from '../auth/auth-context.js'
 import { VALID_CLASSES } from '../constants/classes.js'
 import { getApiErrorMessage } from '../utils/apiError.js'
 
@@ -193,6 +194,7 @@ const groupSessionsBySection = (sessionsList) => {
 // Component
 // ------------------------------------------------------------------ //
 export default function Sessions() {
+  const { user } = useAuth()
   const [sessions,  setSessions]  = useState([])
   const [form,      setForm]      = useState(initialForm)
   const [errors,    setErrors]    = useState(emptyErrors)
@@ -651,7 +653,7 @@ export default function Sessions() {
     try {
       await api.post(`/alerts/${alertId}/dismiss`, {
         note: note.trim() || 'Đã kiểm tra',
-        dismissed_by: 'lecturer'
+        dismissed_by: user?.role || 'teacher'
       })
       setAlertMessage('✅ Đã tắt cảnh báo bảo mật.')
       await loadActiveAlerts(alertModalTarget.id)

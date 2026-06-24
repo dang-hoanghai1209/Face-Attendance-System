@@ -1,6 +1,7 @@
 import os
 import csv
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from time import perf_counter
 from typing import Optional
@@ -45,8 +46,30 @@ from services.attendance_service import OFFICIAL_ATTENDANCE_BLOCK_MESSAGE
 from services.timezone_service import configured_timezone_name, resolved_timezone_name
 
 
-app = FastAPI(title="Face Attendance System")
 logger = logging.getLogger("face_attendance")
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data", "embedding_db.pkl")
+MODEL_TEST_LOG_PATH = Path(BASE_DIR) / "reports" / "model_test_log.csv"
+MEDIA_DIR = Path(BASE_DIR) / "media"
+legacy_embeddings = {}
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global legacy_embeddings
+
+    db = SessionLocal()
+    try:
+        bootstrap_admin_user(db)
+    finally:
+        db.close()
+    legacy_embeddings = load_legacy_embeddings(DB_PATH) if ENABLE_LEGACY_EMBEDDINGS else {}
+    yield
+
+
+app = FastAPI(title="Face Attendance System", lifespan=lifespan)
 
 
 def _cors_origins():
@@ -67,26 +90,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "embedding_db.pkl")
-MODEL_TEST_LOG_PATH = Path(BASE_DIR) / "reports" / "model_test_log.csv"
-MEDIA_DIR = Path(BASE_DIR) / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
-
-legacy_embeddings = {}
-
-
-@app.on_event("startup")
-async def startup_event():
-    global legacy_embeddings
-
-    db = SessionLocal()
-    try:
-        bootstrap_admin_user(db)
-    finally:
-        db.close()
-    legacy_embeddings = load_legacy_embeddings(DB_PATH) if ENABLE_LEGACY_EMBEDDINGS else {}
 
 
 @app.get("/")

@@ -13,7 +13,7 @@ from services.timezone_service import now_in_app_timezone
 
 
 router = APIRouter(prefix="/alerts", tags=["Security Alerts"])
-require_alert_editor = require_role("admin", "teacher", "lecturer")
+require_alert_editor = require_role("admin", "teacher")
 
 
 class AlertDismissRequest(BaseModel):

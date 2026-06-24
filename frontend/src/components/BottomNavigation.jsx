@@ -41,7 +41,7 @@ export default function BottomNavigation() {
         </NavLink>
       )}
 
-      {isAdmin && (
+      {isLecturerOrAdmin && (
         <NavLink
           to="/sessions"
           className={({ isActive }) => 'bottom-nav-item' + (isActive ? ' active' : '')}

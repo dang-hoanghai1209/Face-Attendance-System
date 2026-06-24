@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import UnidentifiedImageError
 import uvicorn
 
-from database import Base, SessionLocal, engine
+from database import SessionLocal
 from face_service import (
     ENABLE_LEGACY_EMBEDDINGS,
     LIVENESS_THRESHOLD,
@@ -32,12 +32,12 @@ from models.attendance_scan import AttendanceScan  # noqa: F401
 from models.classroom import Classroom  # noqa: F401
 from models.course_section import CourseSection  # noqa: F401
 from models.enrollment import Enrollment  # noqa: F401
+from models.audit_log import AuditLog  # noqa: F401
 from models.session import Session as ClassSession
 from models.security_alert import SecurityAlert  # noqa: F401
 from models.student import Student
 from models.subject import Subject  # noqa: F401
 from models.user import User  # noqa: F401
-from schema_sync import sync_schema
 from routes import alerts, attendance, auth, classrooms, course_sections, enrollments, faces, reports, sessions, students, subjects
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
@@ -73,8 +73,6 @@ legacy_embeddings = {}
 async def startup_event():
     global legacy_embeddings
 
-    Base.metadata.create_all(bind=engine)
-    sync_schema(engine)
     db = SessionLocal()
     try:
         bootstrap_admin_user(db)

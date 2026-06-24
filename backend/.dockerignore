@@ -1,0 +1,15 @@
+.env
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+reports
+exports
+media
+uploads
+data/*.pkl
+enrollment_data
+evaluation_data

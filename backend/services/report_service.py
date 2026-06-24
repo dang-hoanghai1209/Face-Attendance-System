@@ -224,7 +224,7 @@ def _identity_values(user):
 
 def _owned_session_query(db: Session, user):
     identities = _identity_values(user)
-    if user.role in {"admin", "viewer"}:
+    if user.role == "admin":
         return db.query(ClassSession)
     if not identities:
         return db.query(ClassSession).filter(False)
@@ -242,7 +242,7 @@ def _owned_session_query(db: Session, user):
 
 
 def get_dashboard_stats_for_user(db: Session, user):
-    if user.role in {"admin", "viewer"}:
+    if user.role == "admin":
         return get_dashboard_stats(db)
 
     if user.role == "student":
@@ -367,7 +367,7 @@ def get_dashboard_stats_for_user(db: Session, user):
 
 
 def user_can_access_class_report(db: Session, user, class_name: str) -> bool:
-    if user.role in {"admin", "viewer"}:
+    if user.role == "admin":
         return True
     if user.role == "student":
         return False
@@ -402,7 +402,7 @@ def build_session_report_for_user(session_id: int, db: Session, user):
     if not session:
         raise HTTPException(status_code=404, detail="Không tìm thấy buổi học.")
 
-    if user.role in {"admin", "viewer"}:
+    if user.role == "admin":
         return build_session_report(session_id, db)
 
     if user.role == "student":

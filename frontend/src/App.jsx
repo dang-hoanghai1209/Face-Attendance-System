@@ -18,6 +18,8 @@ const FaceRegister = lazy(() => import('./pages/FaceRegister'))
 const Reports = lazy(() => import('./pages/Reports'))
 const Sessions = lazy(() => import('./pages/Sessions'))
 const CourseManagement = lazy(() => import('./pages/CourseManagement'))
+const Users = lazy(() => import('./pages/Users'))
+const AuditLogs = lazy(() => import('./pages/AuditLogs'))
 
 const BREADCRUMBS = {
   '/': ['Tổng quan', 'Bảng điều khiển'],
@@ -27,6 +29,8 @@ const BREADCRUMBS = {
   '/faces/register': ['Nhận diện AI', 'Đăng ký khuôn mặt'],
   '/attendance': ['Nhận diện AI', 'Điểm danh'],
   '/reports': ['Phân tích', 'Báo cáo'],
+  '/users': ['Quản lý', 'Tài khoản'],
+  '/audit-logs': ['Hệ thống', 'Lịch sử hoạt động'],
 }
 
 function Topbar() {
@@ -84,11 +88,13 @@ function ProtectedShell() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/students" element={user?.role === 'admin' ? <Students /> : <Navigate to="/" replace />} />
-              <Route path="/sessions" element={user?.role === 'admin' ? <Sessions /> : <Navigate to="/" replace />} />
+              <Route path="/sessions" element={isLecturerOrAdmin ? <Sessions /> : <Navigate to="/" replace />} />
               <Route path="/course-management" element={isLecturerOrAdmin ? <CourseManagement /> : <Navigate to="/" replace />} />
               <Route path="/faces/register" element={user?.role === 'admin' ? <FaceRegister /> : <Navigate to="/" replace />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/users" element={user?.role === 'admin' ? <Users /> : <Navigate to="/" replace />} />
+              <Route path="/audit-logs" element={user?.role === 'admin' ? <AuditLogs /> : <Navigate to="/" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

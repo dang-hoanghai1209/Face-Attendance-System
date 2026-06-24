@@ -10,8 +10,9 @@ const NAV = [
     items: [
       { to: '/', label: 'Tổng quan' },
       { to: '/students', label: 'Sinh viên', adminOnly: true },
-      { to: '/sessions', label: 'Buổi học', adminOnly: true },
+      { to: '/sessions', label: 'Buổi học', lecturerOrAdminOnly: true },
       { to: '/course-management', label: 'Quản lý học phần', lecturerOrAdminOnly: true },
+      { to: '/users', label: 'Quản lý tài khoản', adminOnly: true },
     ],
   },
   {
@@ -25,6 +26,7 @@ const NAV = [
     label: 'Phân tích',
     items: [
       { to: '/reports', label: 'Báo cáo' },
+      { to: '/audit-logs', label: 'Lịch sử hoạt động', adminOnly: true },
     ],
   },
 ]

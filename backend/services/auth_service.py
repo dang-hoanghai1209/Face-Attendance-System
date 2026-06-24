@@ -19,7 +19,7 @@ from models.user import User
 
 
 JWT_ALGORITHM = "HS256"
-VALID_ROLES = {"admin", "teacher", "lecturer", "student", "viewer"}
+VALID_ROLES = {"admin", "teacher", "student"}
 security = HTTPBearer(auto_error=False)
 BASE_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = BASE_DIR / ".env"
@@ -158,10 +158,39 @@ def get_current_user(
     return user
 
 
+def ensure_active_role(role: str) -> str:
+    if role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Vai trò không hợp lệ. Chỉ chấp nhận: {', '.join(sorted(VALID_ROLES))}.",
+        )
+    return role
+
+
 def resolve_student_for_user(db: Session, user: User) -> Student | None:
     if user.role != "student":
         return None
     return db.query(Student).filter(Student.student_code == user.username).first()
+
+
+def user_can_act_for_student(db: Session, user: User, student_code: str) -> bool:
+    if user.role in {"admin", "teacher"}:
+        return True
+    if user.role != "student":
+        return False
+    student = resolve_student_for_user(db, user)
+    return bool(student and student.student_code == student_code)
+
+
+def require_student_self_or_role(db: Session, user: User, student_code: str, *roles: str) -> None:
+    if user.role in roles:
+        return
+    if user_can_act_for_student(db, user, student_code):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Bạn không có quyền thao tác cho sinh viên này.",
+    )
 
 
 def require_role(*roles: str):

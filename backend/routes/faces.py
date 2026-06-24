@@ -13,10 +13,12 @@ from face_service import (
     replace_student_embeddings,
 )
 from models.student import Student
-from services.auth_service import get_current_user, require_admin
+from services.audit_service import audit_safely
+from services.auth_service import get_current_user, require_role
 
 
 router = APIRouter(prefix="/faces", tags=["Faces"])
+require_face_registrar = require_role("admin", "teacher")
 
 
 def _upload_name(upload: UploadFile):
@@ -27,7 +29,7 @@ def _upload_name(upload: UploadFile):
 def register_face_samples(
     student_code: Annotated[str, Form(...)],
     files: Annotated[list[UploadFile], File(...)],
-    _current_user=Depends(require_admin),
+    _current_user=Depends(require_face_registrar),
     db: Session = Depends(get_db),
 ):
     student = db.query(Student).filter(Student.student_code == student_code).first()
@@ -100,6 +102,14 @@ def register_face_samples(
     student.face_status = "registered"
     student.registration_method = "camera"
     db.commit()
+    audit_safely(
+        db,
+        action="face_registered",
+        actor_user=_current_user,
+        target_type="student",
+        target_id=student.id,
+        details={"student_code": student.student_code, "accepted_samples": len(embeddings)},
+    )
 
     return {
         "status": "success",

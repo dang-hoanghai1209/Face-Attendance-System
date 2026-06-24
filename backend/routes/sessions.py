@@ -13,11 +13,13 @@ from models.course_section import CourseSection
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.subject import Subject
-from services.auth_service import get_current_user, require_admin
+from services.audit_service import audit_safely
+from services.auth_service import get_current_user, require_role
 from services.class_service import VALID_CLASS_SET
 
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
+require_session_manager = require_role("admin", "teacher")
 
 VALID_CLASSES = VALID_CLASS_SET
 MISSING_GPS_MESSAGE = "Thiếu tọa độ GPS của buổi học"
@@ -207,7 +209,7 @@ def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depe
 
 
 @router.post("/", response_model=SessionResponse)
-def create_session(session_data: SessionCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def create_session(session_data: SessionCreate, _current_user=Depends(require_session_manager), db: Session = Depends(get_db)):
     if session_data.latitude is None or session_data.longitude is None:
         raise HTTPException(status_code=422, detail=MISSING_GPS_MESSAGE)
 
@@ -215,13 +217,21 @@ def create_session(session_data: SessionCreate, _current_user=Depends(require_ad
     db.add(new_session)
     db.commit()
     db.refresh(new_session)
+    audit_safely(
+        db,
+        action="session_created",
+        actor_user=_current_user,
+        target_type="session",
+        target_id=new_session.id,
+        details={"class_name": new_session.class_name, "session_date": str(new_session.session_date)},
+    )
     return new_session
 
 
 @router.post("/from-section", response_model=SessionResponse)
 def create_session_from_section(
     session_data: SessionFromSectionCreate,
-    _current_user=Depends(require_admin),
+    _current_user=Depends(require_session_manager),
     db: Session = Depends(get_db),
 ):
     section = db.query(CourseSection).filter(CourseSection.id == session_data.section_id).first()
@@ -301,6 +311,14 @@ def create_session_from_section(
     for s in created_sessions:
         db.refresh(s)
         _ = s.section.subject if s.section else None
+        audit_safely(
+            db,
+            action="session_created",
+            actor_user=_current_user,
+            target_type="session",
+            target_id=s.id,
+            details={"section_id": section.id, "session_date": str(s.session_date)},
+        )
 
     return created_sessions[0]
 
@@ -309,7 +327,7 @@ def create_session_from_section(
 def update_session(
     session_id: int,
     session_data: SessionUpdate,
-    _current_user=Depends(require_admin),
+    _current_user=Depends(require_session_manager),
     db: Session = Depends(get_db),
 ):
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
@@ -329,11 +347,19 @@ def update_session(
 
     db.commit()
     db.refresh(session)
+    audit_safely(
+        db,
+        action="session_updated",
+        actor_user=_current_user,
+        target_type="session",
+        target_id=session.id,
+        details={"changed_fields": sorted(updates.keys())},
+    )
     return session
 
 
 @router.delete("/{session_id}")
-def delete_session(session_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def delete_session(session_id: int, _current_user=Depends(require_session_manager), db: Session = Depends(get_db)):
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Buổi học không hợp lệ.")
@@ -350,4 +376,11 @@ def delete_session(session_id: int, _current_user=Depends(require_admin), db: Se
     db.query(RecognitionAttempt).filter(RecognitionAttempt.session_id == session_id).delete()
     db.delete(session)
     db.commit()
+    audit_safely(
+        db,
+        action="session_deleted",
+        actor_user=_current_user,
+        target_type="session",
+        target_id=session_id,
+    )
     return {"message": f"Đã xóa buổi học {session_id}."}

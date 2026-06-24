@@ -8,12 +8,13 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from services import attendance_service
-from services.auth_service import get_current_user, require_role
+from services.audit_service import audit_safely
+from services.auth_service import get_current_user, require_role, require_student_self_or_role
 
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
 logger = logging.getLogger("face_attendance")
-require_attendance_editor = require_role("admin", "teacher", "lecturer")
+require_attendance_editor = require_role("admin", "teacher")
 
 
 class AttendanceCheckIn(BaseModel):
@@ -34,6 +35,22 @@ class AttendanceCheckOut(BaseModel):
     student_code: str
     session_id: int
     confidence: Optional[float] = None
+
+
+def _audit_attendance_response(db: Session, action: str, current_user, data, response):
+    payload = response if isinstance(response, dict) else {}
+    audit_safely(
+        db,
+        action=action,
+        actor_user=current_user,
+        target_type="attendance",
+        target_id=payload.get("record_id") or payload.get("data", {}).get("record_id"),
+        details={
+            "student_code": data.student_code,
+            "session_id": data.session_id,
+            "status": payload.get("status"),
+        },
+    )
 
 
 def _checkin_response(db: Session, data: AttendanceCheckIn):
@@ -65,7 +82,10 @@ def record_attendance(data: AttendanceCheckIn, current_user=Depends(get_current_
         data.student_code,
         current_user.username,
     )
-    return _checkin_response(db, data)
+    require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    response = _checkin_response(db, data)
+    _audit_attendance_response(db, "attendance_checkin", current_user, data, response)
+    return response
 
 
 @router.post("/checkin")
@@ -76,7 +96,10 @@ def record_checkin(data: AttendanceCheckIn, current_user=Depends(get_current_use
         data.student_code,
         current_user.username,
     )
-    return _checkin_response(db, data)
+    require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    response = _checkin_response(db, data)
+    _audit_attendance_response(db, "attendance_checkin", current_user, data, response)
+    return response
 
 
 @router.post("/checkout")
@@ -87,12 +110,15 @@ def record_checkout(data: AttendanceCheckOut, current_user=Depends(get_current_u
         data.student_code,
         current_user.username,
     )
-    return attendance_service.record_checkout(
+    require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    response = attendance_service.record_checkout(
         db,
         student_code=data.student_code,
         session_id=data.session_id,
         confidence=data.confidence,
     )
+    _audit_attendance_response(db, "attendance_checkout", current_user, data, response)
+    return response
 
 
 @router.delete("/{attendance_id}")
@@ -107,7 +133,16 @@ def delete_attendance_record(
         current_user.username,
         current_user.role,
     )
-    return attendance_service.delete_attendance_record(db, attendance_id)
+    response = attendance_service.delete_attendance_record(db, attendance_id)
+    audit_safely(
+        db,
+        action="attendance_deleted",
+        actor_user=current_user,
+        target_type="attendance",
+        target_id=attendance_id,
+        details=response.get("data"),
+    )
+    return response
 
 
 @router.get("/session/{session_id}")

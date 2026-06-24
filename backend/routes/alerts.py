@@ -1,12 +1,13 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.security_alert import SecurityAlert
 from models.student import Student
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import get_current_user, require_role
 from services.security_alert_service import ALERT_TYPES
 from services.timezone_service import now_in_app_timezone
@@ -14,6 +15,20 @@ from services.timezone_service import now_in_app_timezone
 
 router = APIRouter(prefix="/alerts", tags=["Security Alerts"])
 require_alert_editor = require_role("admin", "teacher")
+SECURITY_ALERT_AUDIT_FIELDS = (
+    "session_id",
+    "alert_type",
+    "student_id",
+    "captured_img",
+    "confidence",
+    "liveness_score",
+    "gps_lat",
+    "gps_lng",
+    "dismissed",
+    "dismissed_by",
+    "dismissed_at",
+    "note",
+)
 
 
 class AlertDismissRequest(BaseModel):
@@ -72,6 +87,7 @@ def get_active_session_alerts(session_id: int, _current_user=Depends(get_current
 def dismiss_alert(
     alert_id: int,
     data: AlertDismissRequest,
+    request: Request = None,
     current_user=Depends(require_alert_editor),
     db: Session = Depends(get_db),
 ):
@@ -79,6 +95,8 @@ def dismiss_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Không tìm thấy cảnh báo bảo mật.")
 
+    old_value = model_snapshot(alert, SECURITY_ALERT_AUDIT_FIELDS)
+    student = db.query(Student).filter(Student.id == alert.student_id).first() if alert.student_id else None
     alert.dismissed = True
     alert.dismissed_at = now_in_app_timezone()
     alert.dismissed_by = data.dismissed_by or getattr(current_user, "username", None)
@@ -86,6 +104,22 @@ def dismiss_alert(
         alert.note = data.note
     db.commit()
     db.refresh(alert)
+    audit_safely(
+        db,
+        action="security_alert_dismissed",
+        actor_user=current_user,
+        target_type="security_alert",
+        target_id=alert.id,
+        details=audit_details(
+            request=request,
+            old_value=old_value,
+            new_value=model_snapshot(alert, SECURITY_ALERT_AUDIT_FIELDS),
+            session_id=alert.session_id,
+            student_id=alert.student_id,
+            student_code=student.student_code if student else None,
+            reason=data.note,
+        ),
+    )
     return _serialize_alert(db, alert)
 
 

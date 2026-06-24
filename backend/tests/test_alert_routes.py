@@ -8,9 +8,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 from fastapi import HTTPException
 
 from database import Base, SessionLocal, engine
+from models.audit_log import AuditLog
 from models.security_alert import SecurityAlert
 from models.session import Session as ClassSession
 from models.student import Student
+from models.user import User
 from routes.alerts import (
     AlertDismissRequest,
     count_session_alerts,
@@ -53,6 +55,13 @@ class AlertRouteTests(unittest.TestCase):
         self.db.commit()
         self.db.refresh(student)
         return student
+
+    def add_user(self):
+        user = User(username="teacher01", password_hash="test-hash", role="teacher", is_active=True)
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
 
     def add_alert(self, session_id, alert_type="SPOOF", student_id=None, dismissed=False):
         alert = SecurityAlert(
@@ -120,6 +129,33 @@ class AlertRouteTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             dismiss_alert(999, AlertDismissRequest(), current_user=None, db=self.db)
         self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_dismiss_alert_writes_audit_log(self):
+        session = self.add_session()
+        student = self.add_student()
+        user = self.add_user()
+        alert = self.add_alert(session.id, alert_type="NOT_ENROLLED", student_id=student.id)
+
+        dismiss_alert(
+            alert.id,
+            AlertDismissRequest(note="Reviewed and accepted"),
+            current_user=user,
+            db=self.db,
+        )
+
+        log = self.db.query(AuditLog).filter(AuditLog.action == "security_alert_dismissed").one()
+        self.assertEqual(log.actor_user_id, user.id)
+        self.assertEqual(log.actor_role, "teacher")
+        self.assertEqual(log.target_type, "security_alert")
+        self.assertEqual(log.target_id, str(alert.id))
+        self.assertEqual(log.details["session_id"], session.id)
+        self.assertEqual(log.details["student_id"], student.id)
+        self.assertEqual(log.details["student_code"], student.student_code)
+        self.assertEqual(log.details["reason"], "Reviewed and accepted")
+        self.assertFalse(log.details["old_value"]["dismissed"])
+        self.assertTrue(log.details["new_value"]["dismissed"])
+        self.assertEqual(log.details["old_value"]["note"], "initial note")
+        self.assertEqual(log.details["new_value"]["note"], "Reviewed and accepted")
 
     def test_count_alerts_by_type_counts_only_active(self):
         session = self.add_session()

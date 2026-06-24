@@ -64,3 +64,6 @@ temp/
 # Docker / test artifacts
 *.pid
 coverage/
+
+# Local private notes
+local_notes/

@@ -1,13 +1,13 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.audit_log import AuditLog
 from models.user import User
-from services.audit_service import audit_safely
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import (
     create_access_token,
     ensure_active_role,
@@ -56,18 +56,35 @@ def serialize_user(user: User, db: Session):
     }
 
 
+USER_AUDIT_FIELDS = ("username", "full_name", "role", "is_active")
+
+
 @router.post("/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request = None, db: Session = Depends(get_db)):
     username = payload.username.strip()
     user = db.query(User).filter(User.username == username).first()
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
-        audit_safely(db, action="login_failed", actor_username=username, target_type="user", target_id=username)
+        audit_safely(
+            db,
+            action="login_failed",
+            actor_username=username,
+            target_type="user",
+            target_id=username,
+            details=audit_details(request=request, username=username),
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password.",
         )
 
-    audit_safely(db, action="login_success", actor_user=user, target_type="user", target_id=user.id)
+    audit_safely(
+        db,
+        action="login_success",
+        actor_user=user,
+        target_type="user",
+        target_id=user.id,
+        details=audit_details(request=request, username=user.username, role=user.role),
+    )
     return {
         "access_token": create_access_token(user),
         "token_type": "bearer",
@@ -107,6 +124,7 @@ def list_audit_logs(_current_user: User = Depends(require_admin), db: Session = 
 @router.post("/users", status_code=status.HTTP_201_CREATED)
 def create_user(
     payload: UserCreateRequest,
+    request: Request = None,
     _current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -135,7 +153,10 @@ def create_user(
         actor_user=_current_user,
         target_type="user",
         target_id=user.id,
-        details={"username": user.username, "role": user.role, "is_active": user.is_active},
+        details=audit_details(
+            request=request,
+            new_value=model_snapshot(user, USER_AUDIT_FIELDS),
+        ),
     )
     return serialize_user(user, db)
 
@@ -144,6 +165,7 @@ def create_user(
 def update_user(
     user_id: int,
     payload: UserUpdateRequest,
+    request: Request = None,
     _current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -151,6 +173,7 @@ def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
+    old_value = model_snapshot(user, USER_AUDIT_FIELDS)
     changed_fields = []
     updates = payload.model_dump(exclude_unset=True)
     if "username" in updates:
@@ -186,6 +209,11 @@ def update_user(
         actor_user=_current_user,
         target_type="user",
         target_id=user.id,
-        details={"changed_fields": changed_fields, "role": user.role, "is_active": user.is_active},
+        details=audit_details(
+            request=request,
+            old_value=old_value,
+            new_value=model_snapshot(user, USER_AUDIT_FIELDS),
+            changed_fields=changed_fields,
+        ),
     )
     return serialize_user(user, db)

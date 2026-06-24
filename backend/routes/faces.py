@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -13,12 +13,13 @@ from face_service import (
     replace_student_embeddings,
 )
 from models.student import Student
-from services.audit_service import audit_safely
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import get_current_user, require_role
 
 
 router = APIRouter(prefix="/faces", tags=["Faces"])
 require_face_registrar = require_role("admin", "teacher")
+FACE_STUDENT_AUDIT_FIELDS = ("student_code", "face_status", "registration_method")
 
 
 def _upload_name(upload: UploadFile):
@@ -29,6 +30,7 @@ def _upload_name(upload: UploadFile):
 def register_face_samples(
     student_code: Annotated[str, Form(...)],
     files: Annotated[list[UploadFile], File(...)],
+    request: Request = None,
     _current_user=Depends(require_face_registrar),
     db: Session = Depends(get_db),
 ):
@@ -97,6 +99,8 @@ def register_face_samples(
             },
         )
 
+    old_value = model_snapshot(student, FACE_STUDENT_AUDIT_FIELDS)
+    old_embedding_count = embedding_count(db, student.id)
     mean_embedding = aggregate_embeddings(embeddings)
     replace_student_embeddings(db, student.id, [mean_embedding], source="webcam_mean")
     student.face_status = "registered"
@@ -108,7 +112,16 @@ def register_face_samples(
         actor_user=_current_user,
         target_type="student",
         target_id=student.id,
-        details={"student_code": student.student_code, "accepted_samples": len(embeddings)},
+        details=audit_details(
+            request=request,
+            old_value=old_value,
+            new_value=model_snapshot(student, FACE_STUDENT_AUDIT_FIELDS),
+            student_code=student.student_code,
+            accepted_samples=len(embeddings),
+            rejected_samples=len(rejected_files),
+            old_embedding_count=old_embedding_count,
+            new_embedding_count=embedding_count(db, student.id),
+        ),
     )
 
     return {

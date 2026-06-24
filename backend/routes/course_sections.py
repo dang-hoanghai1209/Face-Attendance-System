@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,12 +14,26 @@ from models.enrollment import Enrollment
 from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import get_current_user, require_admin
 from services.class_service import VALID_CLASS_SET
 
 
 router = APIRouter(prefix="/course-sections", tags=["Course Sections"])
 VALID_SECTION_STATUSES = {"open", "closed", "archived"}
+COURSE_SECTION_AUDIT_FIELDS = (
+    "section_code",
+    "class_name",
+    "section_group",
+    "subject_id",
+    "semester",
+    "academic_year",
+    "lecturer_user_id",
+    "lecturer_name",
+    "min_students",
+    "max_students",
+    "status",
+)
 
 
 def _validate_class(v: Optional[str]) -> Optional[str]:
@@ -208,7 +222,12 @@ def get_course_sections(
 
 
 @router.post("/")
-def create_course_section(data: CourseSectionCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def create_course_section(
+    data: CourseSectionCreate,
+    request: Request = None,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     _ensure_subject_exists(db, data.subject_id)
     
     section_code = data.section_code
@@ -232,6 +251,14 @@ def create_course_section(data: CourseSectionCreate, _current_user=Depends(requi
         db.rollback()
         raise HTTPException(status_code=400, detail="Mã lớp học phần đã tồn tại.") from exc
     db.refresh(section)
+    audit_safely(
+        db,
+        action="course_section_created",
+        actor_user=_current_user,
+        target_type="course_section",
+        target_id=section.id,
+        details=audit_details(request=request, new_value=model_snapshot(section, COURSE_SECTION_AUDIT_FIELDS)),
+    )
     return _serialize_section(db, section)
 
 
@@ -239,12 +266,14 @@ def create_course_section(data: CourseSectionCreate, _current_user=Depends(requi
 def update_course_section(
     section_id: int,
     data: CourseSectionUpdate,
+    request: Request = None,
     _current_user=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     section = db.query(CourseSection).filter(CourseSection.id == section_id).first()
     if not section:
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học phần.")
+    old_value = model_snapshot(section, COURSE_SECTION_AUDIT_FIELDS)
     updates = data.model_dump(exclude_unset=True)
     if "subject_id" in updates:
         _ensure_subject_exists(db, updates["subject_id"])
@@ -274,15 +303,34 @@ def update_course_section(
         db.rollback()
         raise HTTPException(status_code=400, detail="Mã lớp học phần đã tồn tại.") from exc
     db.refresh(section)
+    audit_safely(
+        db,
+        action="course_section_updated",
+        actor_user=_current_user,
+        target_type="course_section",
+        target_id=section.id,
+        details=audit_details(
+            request=request,
+            old_value=old_value,
+            new_value=model_snapshot(section, COURSE_SECTION_AUDIT_FIELDS),
+            changed_fields=sorted(updates.keys()),
+        ),
+    )
     return _serialize_section(db, section)
 
 
 @router.delete("/{section_id}")
-def delete_course_section(section_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def delete_course_section(
+    section_id: int,
+    request: Request = None,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     section = db.query(CourseSection).filter(CourseSection.id == section_id).first()
     if not section:
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học phần.")
 
+    old_value = model_snapshot(section, COURSE_SECTION_AUDIT_FIELDS)
     # Cascade delete all sessions of this course section
     sessions = db.query(ClassSession).filter(ClassSession.section_id == section_id).all()
     for session in sessions:
@@ -304,6 +352,14 @@ def delete_course_section(section_id: int, _current_user=Depends(require_admin),
     # Delete the section
     db.delete(section)
     db.commit()
+    audit_safely(
+        db,
+        action="course_section_deleted",
+        actor_user=_current_user,
+        target_type="course_section",
+        target_id=section_id,
+        details=audit_details(request=request, old_value=old_value),
+    )
     return {"message": "Đã xóa lớp học phần cùng các buổi học và đăng ký liên quan."}
 
 

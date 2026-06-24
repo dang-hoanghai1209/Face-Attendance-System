@@ -1,7 +1,7 @@
 from datetime import date, time, timedelta, datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session, joinedload
 
@@ -13,13 +13,30 @@ from models.course_section import CourseSection
 from models.recognition_attempt import RecognitionAttempt
 from models.session import Session as ClassSession
 from models.subject import Subject
-from services.audit_service import audit_safely
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import get_current_user, require_role
 from services.class_service import VALID_CLASS_SET
 
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 require_session_manager = require_role("admin", "teacher")
+SESSION_AUDIT_FIELDS = (
+    "subject",
+    "class_name",
+    "section_group",
+    "section_id",
+    "classroom_id",
+    "latitude",
+    "longitude",
+    "radius_meters",
+    "room_name",
+    "session_date",
+    "start_time",
+    "end_time",
+    "session_number",
+    "note",
+    "created_by",
+)
 
 VALID_CLASSES = VALID_CLASS_SET
 MISSING_GPS_MESSAGE = "Thiếu tọa độ GPS của buổi học"
@@ -209,7 +226,12 @@ def get_all_sessions(_current_user=Depends(get_current_user), db: Session = Depe
 
 
 @router.post("/", response_model=SessionResponse)
-def create_session(session_data: SessionCreate, _current_user=Depends(require_session_manager), db: Session = Depends(get_db)):
+def create_session(
+    session_data: SessionCreate,
+    request: Request = None,
+    _current_user=Depends(require_session_manager),
+    db: Session = Depends(get_db),
+):
     if session_data.latitude is None or session_data.longitude is None:
         raise HTTPException(status_code=422, detail=MISSING_GPS_MESSAGE)
 
@@ -223,7 +245,10 @@ def create_session(session_data: SessionCreate, _current_user=Depends(require_se
         actor_user=_current_user,
         target_type="session",
         target_id=new_session.id,
-        details={"class_name": new_session.class_name, "session_date": str(new_session.session_date)},
+        details=audit_details(
+            request=request,
+            new_value=model_snapshot(new_session, SESSION_AUDIT_FIELDS),
+        ),
     )
     return new_session
 
@@ -231,6 +256,7 @@ def create_session(session_data: SessionCreate, _current_user=Depends(require_se
 @router.post("/from-section", response_model=SessionResponse)
 def create_session_from_section(
     session_data: SessionFromSectionCreate,
+    request: Request = None,
     _current_user=Depends(require_session_manager),
     db: Session = Depends(get_db),
 ):
@@ -317,7 +343,11 @@ def create_session_from_section(
             actor_user=_current_user,
             target_type="session",
             target_id=s.id,
-            details={"section_id": section.id, "session_date": str(s.session_date)},
+            details=audit_details(
+                request=request,
+                new_value=model_snapshot(s, SESSION_AUDIT_FIELDS),
+                section_id=section.id,
+            ),
         )
 
     return created_sessions[0]
@@ -327,6 +357,7 @@ def create_session_from_section(
 def update_session(
     session_id: int,
     session_data: SessionUpdate,
+    request: Request = None,
     _current_user=Depends(require_session_manager),
     db: Session = Depends(get_db),
 ):
@@ -334,6 +365,7 @@ def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Buổi học không hợp lệ.")
 
+    old_value = model_snapshot(session, SESSION_AUDIT_FIELDS)
     updates = session_data.model_dump(exclude_unset=True)
     next_start_time = updates.get("start_time", session.start_time)
     next_end_time = updates.get("end_time", session.end_time)
@@ -353,17 +385,28 @@ def update_session(
         actor_user=_current_user,
         target_type="session",
         target_id=session.id,
-        details={"changed_fields": sorted(updates.keys())},
+        details=audit_details(
+            request=request,
+            old_value=old_value,
+            new_value=model_snapshot(session, SESSION_AUDIT_FIELDS),
+            changed_fields=sorted(updates.keys()),
+        ),
     )
     return session
 
 
 @router.delete("/{session_id}")
-def delete_session(session_id: int, _current_user=Depends(require_session_manager), db: Session = Depends(get_db)):
+def delete_session(
+    session_id: int,
+    request: Request = None,
+    _current_user=Depends(require_session_manager),
+    db: Session = Depends(get_db),
+):
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Buổi học không hợp lệ.")
 
+    old_value = model_snapshot(session, SESSION_AUDIT_FIELDS)
     attendance_ids = [
         row.id
         for row in db.query(Attendance.id).filter(Attendance.session_id == session_id).all()
@@ -382,5 +425,6 @@ def delete_session(session_id: int, _current_user=Depends(require_session_manage
         actor_user=_current_user,
         target_type="session",
         target_id=session_id,
+        details=audit_details(request=request, old_value=old_value),
     )
     return {"message": f"Đã xóa buổi học {session_id}."}

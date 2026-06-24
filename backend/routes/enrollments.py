@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -9,11 +9,13 @@ from models.enrollment import Enrollment
 from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import get_current_user, require_admin
 
 
 router = APIRouter(tags=["Enrollments"])
 VALID_ENROLLMENT_STATUSES = {"active", "dropped", "completed"}
+ENROLLMENT_AUDIT_FIELDS = ("session_id", "course_section_id", "student_id", "status", "note")
 
 
 class EnrollmentCreate(BaseModel):
@@ -119,6 +121,7 @@ def _add_students_to_session_enrollment(db: Session, session_id: int, students: 
 def enroll_students_in_session(
     session_id: int,
     data: SessionEnrollmentRequest,
+    request: Request = None,
     _current_user=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -149,6 +152,18 @@ def enroll_students_in_session(
         session_id,
         [by_code[code] for code in requested_codes if code in by_code],
     )
+    audit_safely(
+        db,
+        action="session_enrollment_updated",
+        actor_user=_current_user,
+        target_type="session",
+        target_id=session_id,
+        details=audit_details(
+            request=request,
+            new_value={"added": added, "skipped_student_codes": skipped, "failed_items": failed},
+            requested_student_codes=requested_codes,
+        ),
+    )
 
     return {
         "session_id": session_id,
@@ -172,6 +187,7 @@ def get_session_enrollments(session_id: int, _current_user=Depends(get_current_u
 def delete_session_enrollment(
     session_id: int,
     student_code: str,
+    request: Request = None,
     _current_user=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -188,8 +204,17 @@ def delete_session_enrollment(
     if not enrollment:
         raise HTTPException(status_code=404, detail="Sinh viên chưa có trong enrollment của buổi học.")
 
+    old_value = model_snapshot(enrollment, ENROLLMENT_AUDIT_FIELDS)
     db.delete(enrollment)
     db.commit()
+    audit_safely(
+        db,
+        action="session_enrollment_deleted",
+        actor_user=_current_user,
+        target_type="session_enrollment",
+        target_id=f"{session_id}:{student.id}",
+        details=audit_details(request=request, old_value=old_value, student_code=student.student_code),
+    )
     return {
         "session_id": session_id,
         "student_code": student.student_code,
@@ -201,6 +226,7 @@ def delete_session_enrollment(
 def import_session_enrollments_by_class(
     session_id: int,
     data: SessionEnrollmentImportRequest,
+    request: Request = None,
     _current_user=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -211,6 +237,19 @@ def import_session_enrollments_by_class(
 
     students = db.query(Student).filter(Student.class_name == class_name).order_by(Student.student_code.asc()).all()
     added, skipped, enrolled = _add_students_to_session_enrollment(db, session_id, students)
+    audit_safely(
+        db,
+        action="session_enrollment_imported",
+        actor_user=_current_user,
+        target_type="session",
+        target_id=session_id,
+        details=audit_details(
+            request=request,
+            new_value={"added": added, "skipped_student_codes": skipped},
+            class_name=class_name,
+            total_found=len(students),
+        ),
+    )
 
     return {
         "session_id": session_id,
@@ -224,7 +263,12 @@ def import_session_enrollments_by_class(
 
 
 @router.post("/enrollments")
-def create_enrollment(data: EnrollmentCreate, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def create_enrollment(
+    data: EnrollmentCreate,
+    request: Request = None,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     if not db.query(CourseSection).filter(CourseSection.id == data.course_section_id).first():
         raise HTTPException(status_code=404, detail="Không tìm thấy lớp học phần.")
     if not db.query(Student).filter(Student.id == data.student_id).first():
@@ -238,16 +282,38 @@ def create_enrollment(data: EnrollmentCreate, _current_user=Depends(require_admi
         db.rollback()
         raise HTTPException(status_code=400, detail="Sinh viên đã có trong lớp học phần này.") from exc
     db.refresh(enrollment)
+    audit_safely(
+        db,
+        action="enrollment_created",
+        actor_user=_current_user,
+        target_type="enrollment",
+        target_id=enrollment.id,
+        details=audit_details(request=request, new_value=model_snapshot(enrollment, ENROLLMENT_AUDIT_FIELDS)),
+    )
     return _serialize_enrollment(db, enrollment)
 
 
 @router.delete("/enrollments/{enrollment_id}")
-def delete_enrollment(enrollment_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def delete_enrollment(
+    enrollment_id: int,
+    request: Request = None,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     enrollment = db.query(Enrollment).filter(Enrollment.id == enrollment_id).first()
     if not enrollment:
         raise HTTPException(status_code=404, detail="Không tìm thấy đăng ký học phần.")
+    old_value = model_snapshot(enrollment, ENROLLMENT_AUDIT_FIELDS)
     db.delete(enrollment)
     db.commit()
+    audit_safely(
+        db,
+        action="enrollment_deleted",
+        actor_user=_current_user,
+        target_type="enrollment",
+        target_id=enrollment_id,
+        details=audit_details(request=request, old_value=old_value),
+    )
     return {"message": "Đã xóa đăng ký học phần."}
 
 

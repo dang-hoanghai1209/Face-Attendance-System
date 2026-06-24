@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -17,12 +17,23 @@ from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
 from services.attendance_service import EARLY_CHECKIN_MINUTES, LATE_THRESHOLD_MINUTES
+from services.audit_service import audit_details, audit_safely, model_snapshot
 from services.auth_service import get_current_user, require_admin, resolve_student_for_user
 from services.class_service import VALID_CLASS_SET, student_code_matches_class
 from services.timezone_service import now_in_app_timezone
 
 
 router = APIRouter(prefix="/students", tags=["Students"])
+STUDENT_AUDIT_FIELDS = (
+    "student_code",
+    "full_name",
+    "class_name",
+    "face_status",
+    "data_source",
+    "registration_method",
+    "is_demo",
+    "avatar_path",
+)
 
 # ------------------------------------------------------------------ #
 #  Các hằng số validation                                            #
@@ -226,7 +237,12 @@ def get_all_students(_current_user=Depends(get_current_user), db: Session = Depe
 
 
 @router.post("/")
-def create_student(student: StudentBase, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def create_student(
+    student: StudentBase,
+    request: Request = None,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     _ensure_code_matches_class(student.student_code, student.class_name)
 
     existing = db.query(Student).filter(Student.student_code == student.student_code).first()
@@ -237,6 +253,14 @@ def create_student(student: StudentBase, _current_user=Depends(require_admin), d
     db.add(db_student)
     db.commit()
     db.refresh(db_student)
+    audit_safely(
+        db,
+        action="student_created",
+        actor_user=_current_user,
+        target_type="student",
+        target_id=db_student.id,
+        details=audit_details(request=request, new_value=model_snapshot(db_student, STUDENT_AUDIT_FIELDS)),
+    )
     return db_student
 
 
@@ -244,6 +268,7 @@ def create_student(student: StudentBase, _current_user=Depends(require_admin), d
 def update_student(
     student_id: int,
     student_data: StudentUpdate,
+    request: Request = None,
     _current_user=Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -251,6 +276,7 @@ def update_student(
     if not student:
         raise HTTPException(status_code=404, detail="Sinh viên không hợp lệ.")
 
+    old_value = model_snapshot(student, STUDENT_AUDIT_FIELDS)
     updates = student_data.model_dump(exclude_unset=True)
     next_student_code = updates.get("student_code", student.student_code)
     next_class_name = updates.get("class_name", student.class_name)
@@ -270,18 +296,46 @@ def update_student(
 
     db.commit()
     db.refresh(student)
+    audit_safely(
+        db,
+        action="student_updated",
+        actor_user=_current_user,
+        target_type="student",
+        target_id=student.id,
+        details=audit_details(
+            request=request,
+            old_value=old_value,
+            new_value=model_snapshot(student, STUDENT_AUDIT_FIELDS),
+            changed_fields=sorted(updates.keys()),
+        ),
+    )
     return student
 
 
 @router.delete("/{student_id}")
-def delete_student(student_id: int, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
+def delete_student(
+    student_id: int,
+    request: Request = None,
+    _current_user=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Sinh viên không hợp lệ.")
 
+    old_value = model_snapshot(student, STUDENT_AUDIT_FIELDS)
+    full_name = student.full_name
     db.query(Attendance).filter(Attendance.student_id == student_id).delete()
     db.query(FaceEmbedding).filter(FaceEmbedding.student_id == student_id).delete()
     db.query(RecognitionAttempt).filter(RecognitionAttempt.predicted_student_id == student_id).delete()
     db.delete(student)
     db.commit()
-    return {"message": f"Đã xóa sinh viên {student.full_name}."}
+    audit_safely(
+        db,
+        action="student_deleted",
+        actor_user=_current_user,
+        target_type="student",
+        target_id=student_id,
+        details=audit_details(request=request, old_value=old_value),
+    )
+    return {"message": f"Đã xóa sinh viên {full_name}."}

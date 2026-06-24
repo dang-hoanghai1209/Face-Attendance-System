@@ -16,12 +16,24 @@ backend/.pytest_cache/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/test-results/
+frontend/playwright-report/
 
 # Env / secrets
 .env
 *.env
+.env.*
+backend/.env.*
+frontend/.env.*
 backend/.env
 frontend/.env
+!.env.example
+!.env.prod.example
+!.env.production.example
+!backend/.env.example
+!backend/.env.production.example
+!frontend/.env.example
+!frontend/.env.production.example
 
 # Logs
 *.log
@@ -48,3 +60,7 @@ backend/uploads/
 .cache/
 tmp/
 temp/
+
+# Docker / test artifacts
+*.pid
+coverage/

@@ -66,7 +66,7 @@ function Topbar() {
 
 function ProtectedShell() {
   const { checking, isAuthenticated, user } = useAuth()
-  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
+  const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
   if (checking) {
     return (
@@ -88,8 +88,8 @@ function ProtectedShell() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/students" element={user?.role === 'admin' ? <Students /> : <Navigate to="/" replace />} />
-              <Route path="/sessions" element={isLecturerOrAdmin ? <Sessions /> : <Navigate to="/" replace />} />
-              <Route path="/course-management" element={isLecturerOrAdmin ? <CourseManagement /> : <Navigate to="/" replace />} />
+              <Route path="/sessions" element={isTeacherOrAdmin ? <Sessions /> : <Navigate to="/" replace />} />
+              <Route path="/course-management" element={isTeacherOrAdmin ? <CourseManagement /> : <Navigate to="/" replace />} />
               <Route path="/faces/register" element={user?.role === 'admin' ? <FaceRegister /> : <Navigate to="/" replace />} />
               <Route path="/attendance" element={<Attendance />} />
               <Route path="/reports" element={<Reports />} />

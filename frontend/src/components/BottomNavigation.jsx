@@ -4,7 +4,7 @@ import { useAuth } from '../auth/auth-context.js'
 export default function BottomNavigation() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
+  const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
   return (
     <nav className="bottom-nav">
@@ -41,7 +41,7 @@ export default function BottomNavigation() {
         </NavLink>
       )}
 
-      {isLecturerOrAdmin && (
+      {isTeacherOrAdmin && (
         <NavLink
           to="/sessions"
           className={({ isActive }) => 'bottom-nav-item' + (isActive ? ' active' : '')}
@@ -71,7 +71,7 @@ export default function BottomNavigation() {
         <span>Điểm danh</span>
       </NavLink>
 
-      {isLecturerOrAdmin && (
+      {isTeacherOrAdmin && (
         <NavLink
           to="/course-management"
           className={({ isActive }) => 'bottom-nav-item' + (isActive ? ' active' : '')}

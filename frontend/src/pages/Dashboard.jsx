@@ -103,7 +103,7 @@ export default function Dashboard() {
   const CARDS = isStudent ? studentCards : adminCards
 
   const getFilteredQuickActions = () => {
-    const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
+    const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
     const isAdmin = user?.role === 'admin'
 
     const actions = []
@@ -112,7 +112,7 @@ export default function Dashboard() {
       actions.push({ to: '/sessions', icon: '📅', label: 'Buổi học', desc: 'Tạo lịch học theo môn, lớp và khung giờ.' })
       actions.push({ to: '/faces/register', icon: '📸', label: 'Đăng ký khuôn mặt', desc: 'Chụp mẫu bằng camera và lưu đặc trưng khuôn mặt.' })
     }
-    if (isLecturerOrAdmin) {
+    if (isTeacherOrAdmin) {
       actions.push({ to: '/course-management', icon: '👥', label: 'Quản lý học phần', desc: 'Quản lý môn học, phòng học, lớp học phần và xếp lịch.' })
     }
     actions.push({ to: '/attendance', icon: '✅', label: 'Điểm danh', desc: 'Nhận diện để ghi nhận vào lớp hoặc ra về.' })

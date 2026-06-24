@@ -1,4 +1,16 @@
+"""Deprecated legacy schema patcher.
+
+This module is kept only for old compatibility tests and manual emergency
+recovery. Application startup must not import or call sync_schema anymore.
+All production schema changes must go through Alembic migrations.
+"""
+
 from sqlalchemy import inspect, text
+
+
+DEPRECATED_SCHEMA_SYNC_MESSAGE = (
+    "schema_sync.py is deprecated. Use Alembic migrations for database schema changes."
+)
 
 
 def _get_columns(inspector, table_name):
@@ -264,6 +276,7 @@ def _sync_user_columns(connection, columns):
         columns.add("created_at")
 
     connection.execute(text("UPDATE users SET role = 'teacher' WHERE role IS NULL OR role = ''"))
+    connection.execute(text("UPDATE users SET role = 'teacher' WHERE role IN ('lecturer', 'viewer')"))
     connection.execute(text("UPDATE users SET is_active = TRUE WHERE is_active IS NULL"))
     connection.execute(text("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
     connection.execute(
@@ -273,7 +286,7 @@ def _sync_user_columns(connection, columns):
             BEGIN
                 ALTER TABLE users DROP CONSTRAINT IF EXISTS ck_users_role;
                 ALTER TABLE users
-                ADD CONSTRAINT ck_users_role CHECK (role IN ('admin', 'teacher', 'lecturer', 'student', 'viewer'));
+                ADD CONSTRAINT ck_users_role CHECK (role IN ('admin', 'teacher', 'student'));
             END $$;
             """
         )

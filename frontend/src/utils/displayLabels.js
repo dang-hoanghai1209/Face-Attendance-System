@@ -37,9 +37,7 @@ export const registrationMethodLabels = {
 export const roleLabels = {
   admin: 'Quản trị viên',
   teacher: 'Giảng viên',
-  lecturer: 'Giảng viên',
   student: 'Sinh viên',
-  viewer: 'Người xem',
 }
 
 export const getDisplayLabel = (labels, value, fallback = '-') =>

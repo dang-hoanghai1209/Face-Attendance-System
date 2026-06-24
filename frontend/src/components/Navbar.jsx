@@ -10,8 +10,8 @@ const NAV = [
     items: [
       { to: '/', label: 'Tổng quan' },
       { to: '/students', label: 'Sinh viên', adminOnly: true },
-      { to: '/sessions', label: 'Buổi học', lecturerOrAdminOnly: true },
-      { to: '/course-management', label: 'Quản lý học phần', lecturerOrAdminOnly: true },
+      { to: '/sessions', label: 'Buổi học', teacherOrAdminOnly: true },
+      { to: '/course-management', label: 'Quản lý học phần', teacherOrAdminOnly: true },
       { to: '/users', label: 'Quản lý tài khoản', adminOnly: true },
     ],
   },
@@ -34,7 +34,7 @@ const NAV = [
 export default function Sidebar() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const isLecturerOrAdmin = user?.role === 'admin' || user?.role === 'teacher' || user?.role === 'lecturer'
+  const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
   return (
     <aside className="sidebar">
@@ -49,7 +49,7 @@ export default function Sidebar() {
       {NAV.map((section) => {
         const items = section.items.filter((item) => {
           if (item.adminOnly && !isAdmin) return false
-          if (item.lecturerOrAdminOnly && !isLecturerOrAdmin) return false
+          if (item.teacherOrAdminOnly && !isTeacherOrAdmin) return false
           return true
         })
         if (!items.length) return null

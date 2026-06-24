@@ -48,12 +48,20 @@ from services.timezone_service import configured_timezone_name, resolved_timezon
 app = FastAPI(title="Face Attendance System")
 logger = logging.getLogger("face_attendance")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+
+def _cors_origins():
+    raw_value = os.getenv("CORS_ORIGINS")
+    if raw_value:
+        return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+    return [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-    ],
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

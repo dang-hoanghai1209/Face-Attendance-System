@@ -10,7 +10,8 @@ Tai lieu nay da duoc cap nhat theo code hien co trong repo, khong phai theo dac 
 - Frontend da co cac man hinh Dashboard, Students, Sessions, Face Register, Attendance va Reports.
 - Production flow hien tai la webcam-first: tao sinh vien, chup mau mat tu camera, luu mean embedding vao PostgreSQL, sau do nhan dien de check-in/check-out.
 - Legacy embeddings trong `backend/data/embedding_db.pkl` chi nen dung cho dev/bootstrap va chi duoc load khi bat `ENABLE_LEGACY_EMBEDDINGS=true`.
-- Chua co Alembic migration, chua co test suite, chua co auth/JWT, chua co liveness detection va chua co realtime feed.
+- Da co JWT/RBAC, audit log, Alembic migration va test suite co ban.
+- Chua co realtime feed.
 
 ## Cong nghe
 
@@ -84,10 +85,9 @@ Face_Attendance_System/
 |   |   +-- main.jsx
 |   +-- package.json
 |   +-- vite.config.js
-+-- docker-compose.yml/
++-- docker-compose.yml
++-- docker-compose.prod.yml
 ```
-
-Luu y: `docker-compose.yml` dang la mot thu muc, khong phai file compose hop le. Neu can Docker Compose, can tao lai file `docker-compose.yml` dung dinh dang YAML.
 
 ## Tai lieu workflow du lieu
 
@@ -100,6 +100,7 @@ Xem `docs/DATA_WORKFLOW.md` de biet quy trinh du lieu that, vai tro du lieu Kagg
 ```bash
 cd backend
 pip install -r requirements.txt
+alembic -c alembic.ini upgrade head
 python main.py
 ```
 
@@ -120,12 +121,44 @@ ENABLE_LEGACY_EMBEDDINGS=false
 
 `backend/.env.example` nen dung `THRESHOLD_CONFIRM`, `THRESHOLD_UNCERTAIN` va `ENABLE_LEGACY_EMBEDDINGS` de khop code hien tai.
 
+### Migration database
+
+App khong tu tao hoac tu sua schema database khi startup nua. Tat ca thay doi schema phai di qua Alembic.
+
+Database moi:
+
+```bash
+cd backend
+alembic -c alembic.ini upgrade head
+```
+
+Database da ton tai va schema hien tai da khop code:
+
+```bash
+cd backend
+alembic -c alembic.ini stamp 0001_current_schema_with_audit
+alembic -c alembic.ini upgrade head
+```
+
+Lenh `stamp` chi ghi nhan baseline Alembic, khong sua du lieu. Neu database cu thieu cot/bang, can kiem tra tren ban copy truoc khi chay production migration.
+
+Tao migration moi:
+
+```bash
+cd backend
+alembic -c alembic.ini revision --autogenerate -m "short_description"
+alembic -c alembic.ini upgrade head
+```
+
+`schema_sync.py` la legacy/deprecated, chi giu lai cho test tuong thich va khong duoc goi tu startup.
+
 ### Startup
 
 Khi startup, `backend/main.py`:
 
-- Tao bang bang `Base.metadata.create_all(bind=engine)`.
-- Goi `sync_schema(engine)` de bo sung cot bi thieu cho database cu.
+- Khong goi `Base.metadata.create_all(bind=engine)`.
+- Khong goi `sync_schema(engine)`.
+- Bootstrap admin user neu DB da duoc migrate va bien `AUTH_BOOTSTRAP_ADMIN_*` duoc cau hinh.
 - Load legacy embeddings neu `ENABLE_LEGACY_EMBEDDINGS=true`.
 - Dang ky route modules: students, attendance, sessions, reports, faces.
 
@@ -165,12 +198,12 @@ Script tao embedding bang pipeline MTCNN/FaceNet hien co va luu vao `face_embedd
 
 ### CORS
 
-Backend hien cho phep:
+Backend doc danh sach origin tu bien moi truong `CORS_ORIGINS`, phan tach bang dau phay. Neu khong cau hinh, backend cho phep dev origins:
 
 - `http://localhost:5173`
 - `http://127.0.0.1:5173`
 
-Chua cho phep `http://localhost` trong code hien tai.
+Production nen dat `CORS_ORIGINS` dung frontend public URL, vi du `https://your-frontend.example.com`.
 
 ## Database schema hien tai
 
@@ -475,6 +508,57 @@ Co the doi bang `frontend/.env`:
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
+## Production deploy bang Docker
+
+Khong commit file `.env` that. Dung file example de tao file cau hinh local/production:
+
+```bash
+copy .env.prod.example .env.prod
+copy backend\.env.production.example backend\.env.production
+copy frontend\.env.production.example frontend\.env.production
+```
+
+Tao secret manh cho production:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Cap nhat cac gia tri bat buoc trong `.env.prod`:
+
+- `POSTGRES_PASSWORD`
+- `DATABASE_URL`
+- `SECRET_KEY`
+- `AUTH_BOOTSTRAP_ADMIN_PASSWORD`
+- `CORS_ORIGINS`
+- `VITE_API_BASE_URL`
+
+Build image production:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml build
+```
+
+Chay database truoc:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d postgres
+```
+
+Chay migration khi deploy:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm backend alembic -c alembic.ini upgrade head
+```
+
+Chay backend/frontend production:
+
+```bash
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+```
+
+Backend image dung Gunicorn voi Uvicorn worker, khong dung `uvicorn --reload`. Frontend duoc build bang Vite production va serve bang Nginx.
+
 ### Pages
 
 - `/`: Dashboard, goi `/reports/dashboard/stats`.
@@ -522,12 +606,11 @@ Nguong warning hien tai: `rate < 0.8`.
 
 ## Diem lech can xu ly tiep
 
-- `docker-compose.yml` dang la thu muc, can sua thanh file neu muon chay Docker Compose.
 - `/recognize` chua tra object `student` day du nhu dac ta ban dau.
 - Dang ky khuon mat hien la `/faces/register`, chua co flow `/register/start`, `/register/capture`, `/register/finalize`.
 - Frontend Face Register co auto capture theo brightness/sharpness heuristic, chua auto capture theo confidence MTCNN tu backend.
 - Anh capture chua duoc luu vao `backend/media/captures/`.
 - Embedding production hien luu `LargeBinary`, khong phai `FLOAT8[]`.
 - Response format chua dong nhat 100% theo `{ "status": "...", "data": {...}, "message": "..." }`.
-- Chua co Alembic migration.
-- Chua co automated tests.
+- Alembic migration da thay the startup schema sync; can tiep tuc viet migration moi cho moi thay doi schema.
+- Da co automated tests backend va Playwright smoke test frontend cho auth/RBAC.

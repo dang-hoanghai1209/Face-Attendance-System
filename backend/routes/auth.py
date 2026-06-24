@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.audit_log import AuditLog
 from models.user import User
 from services.audit_service import audit_safely
 from services.auth_service import (
@@ -78,8 +79,6 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 def get_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return serialize_user(current_user, db)
 
-
-from models.audit_log import AuditLog
 
 @router.get("/users")
 def list_users(_current_user: User = Depends(require_admin), db: Session = Depends(get_db)):

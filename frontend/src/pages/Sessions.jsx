@@ -86,34 +86,65 @@ const getImageUrl = (path) => {
 }
 
 const getAlertCardStyle = (type) => {
-  if (type === 'SPOOF' || type === 'UNKNOWN_FACE') {
+  const t = (type || '').toUpperCase()
+  if (t === 'SPOOF') {
     return {
-      border: '1px solid rgba(244,63,94,0.3)',
-      background: 'rgba(244,63,94,0.06)',
-      color: '#fda4af',
-      badgeBg: 'rgba(244,63,94,0.15)',
-      badgeColor: '#fb7185',
-      label: type === 'SPOOF' ? 'Giả mạo khuôn mặt' : 'Khuôn mặt lạ'
+      border: '1px solid rgba(239, 68, 68, 0.3)',
+      background: 'rgba(239, 68, 68, 0.06)',
+      color: '#fca5a5',
+      badgeBg: 'rgba(239, 68, 68, 0.15)',
+      badgeColor: '#ef4444',
+      label: 'Giả mạo khuôn mặt (SPOOF)'
     }
   }
-  if (type === 'NOT_ENROLLED') {
+  if (t === 'UNKNOWN_FACE' || t === 'UNKNOWN') {
     return {
-      border: '1px solid rgba(249,115,22,0.3)',
-      background: 'rgba(249,115,22,0.06)',
+      border: '1px solid rgba(249, 115, 22, 0.3)',
+      background: 'rgba(249, 115, 22, 0.06)',
       color: '#ffedd5',
-      badgeBg: 'rgba(249,115,22,0.15)',
+      badgeBg: 'rgba(249, 115, 22, 0.15)',
       badgeColor: '#f97316',
-      label: 'Sinh viên không thuộc danh sách lớp học phần'
+      label: 'Khuôn mặt lạ (UNKNOWN)'
     }
   }
-  if (type === 'LATE_ENTRY') {
+  if (t === 'FACE_UNCLEAR') {
     return {
-      border: '1px solid rgba(251,191,36,0.3)',
-      background: 'rgba(251,191,36,0.06)',
+      border: '1px solid rgba(245, 158, 11, 0.3)',
+      background: 'rgba(245, 158, 11, 0.06)',
       color: '#fef3c7',
-      badgeBg: 'rgba(251,191,36,0.15)',
-      badgeColor: '#fbbf24',
-      label: 'Đi học muộn'
+      badgeBg: 'rgba(245, 158, 11, 0.15)',
+      badgeColor: '#f59e0b',
+      label: 'Khuôn mặt chưa rõ (FACE_UNCLEAR)'
+    }
+  }
+  if (t === 'NOT_ENROLLED') {
+    return {
+      border: '1px solid rgba(168, 85, 247, 0.3)',
+      background: 'rgba(168, 85, 247, 0.06)',
+      color: '#f3e8ff',
+      badgeBg: 'rgba(168, 85, 247, 0.15)',
+      badgeColor: '#a855f7',
+      label: 'Không thuộc lớp HP (NOT_ENROLLED)'
+    }
+  }
+  if (t === 'GPS_FAILED' || t === 'GPS_OUT_OF_RANGE') {
+    return {
+      border: '1px solid rgba(59, 130, 246, 0.3)',
+      background: 'rgba(59, 130, 246, 0.06)',
+      color: '#dbeafe',
+      badgeBg: 'rgba(59, 130, 246, 0.15)',
+      badgeColor: '#3b82f6',
+      label: t === 'GPS_OUT_OF_RANGE' ? 'GPS ngoài bán kính' : 'Lỗi định vị GPS'
+    }
+  }
+  if (t === 'LATE_ENTRY') {
+    return {
+      border: '1px solid rgba(59, 130, 246, 0.3)',
+      background: 'rgba(59, 130, 246, 0.06)',
+      color: '#dbeafe',
+      badgeBg: 'rgba(59, 130, 246, 0.15)',
+      badgeColor: '#3b82f6',
+      label: 'Đi học muộn (LATE_ENTRY)'
     }
   }
   return {
@@ -124,6 +155,87 @@ const getAlertCardStyle = (type) => {
     badgeColor: 'var(--white2)',
     label: type
   }
+}
+
+const parseNoteSafely = (note) => {
+  if (!note) return null
+  try {
+    if (typeof note === 'string') {
+      const parsed = JSON.parse(note)
+      if (parsed && typeof parsed === 'object') return parsed
+    }
+  } catch (e) {}
+  return null
+}
+
+const renderConfidence = (alert) => {
+  let confidenceVal = alert.confidence
+  let label = 'Độ tin cậy'
+  
+  const type = (alert.alert_type || '').toUpperCase()
+  if (type === 'FACE_UNCLEAR') {
+    label = 'Độ tin cậy phát hiện khuôn mặt'
+    const parsed = parseNoteSafely(alert.note)
+    if ((confidenceVal === null || confidenceVal === undefined) && parsed && parsed.detection_confidence !== undefined) {
+      confidenceVal = parsed.detection_confidence
+    }
+  } else if (type === 'UNKNOWN_FACE' || type === 'UNKNOWN') {
+    label = 'Độ tin cậy khớp danh tính'
+  } else if (type === 'SPOOF') {
+    label = 'Độ tin cậy cảnh báo'
+  }
+
+  if (confidenceVal === null || confidenceVal === undefined) return null
+  return (
+    <span>
+      {label}: {(confidenceVal * 100).toFixed(0)}%
+    </span>
+  )
+}
+
+const AlertImage = ({ path }) => {
+  const [hasError, setHasError] = useState(false)
+  const url = getImageUrl(path)
+  
+  if (hasError || !url) {
+    return (
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 6,
+          background: 'rgba(244,63,94,0.08)',
+          border: '1px solid rgba(244,63,94,0.2)',
+          color: '#fb7185',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 10,
+          textAlign: 'center',
+          padding: 4
+        }}
+      >
+        Không tải được ảnh
+      </div>
+    )
+  }
+  
+  return (
+    <img
+      src={url}
+      alt="Captured alert"
+      style={{
+        width: 72,
+        height: 72,
+        borderRadius: 6,
+        objectFit: 'cover',
+        border: '1px solid rgba(255,255,255,0.1)',
+        cursor: 'pointer'
+      }}
+      onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+      onError={() => setHasError(true)}
+    />
+  )
 }
 
 // ------------------------------------------------------------------ //
@@ -337,6 +449,7 @@ export default function Sessions() {
   const [activeAlerts,      setActiveAlerts]      = useState([])
   const [alertLoading,      setAlertLoading]      = useState(false)
   const [alertMessage,      setAlertMessage]      = useState('')
+  const [alertFilter,       setAlertFilter]       = useState('active')
 
   const loadAlertCounts = async (sessionsList) => {
     const counts = {}
@@ -358,10 +471,10 @@ export default function Sessions() {
   useEffect(() => {
     if (!alertModalTarget) return
     const id = setInterval(() => {
-      loadActiveAlertsSilent(alertModalTarget.id)
+      loadAlertsSilent(alertModalTarget.id, alertFilter)
     }, 5000)
     return () => clearInterval(id)
-  }, [alertModalTarget])
+  }, [alertModalTarget, alertFilter])
 
   const loadSessions = async () => {
     try {
@@ -617,14 +730,17 @@ export default function Sessions() {
 
   const handleOpenAlerts = (session) => {
     setAlertModalTarget(session)
+    setAlertFilter('active')
     setAlertMessage('')
-    loadActiveAlerts(session.id)
+    loadAlerts(session.id, 'active')
   }
 
-  const loadActiveAlerts = async (sid) => {
+  const loadAlerts = async (sid, filterType = alertFilter) => {
     setAlertLoading(true)
+    setAlertMessage('')
     try {
-      const response = await api.get(`/alerts/session/${sid}/active`)
+      const endpoint = filterType === 'active' ? `/alerts/session/${sid}/active` : `/alerts/session/${sid}`
+      const response = await api.get(endpoint)
       setActiveAlerts(response.data)
     } catch (error) {
       setAlertMessage(getApiErrorMessage(error, 'Không tải được danh sách cảnh báo.'))
@@ -633,9 +749,10 @@ export default function Sessions() {
     }
   }
 
-  const loadActiveAlertsSilent = async (sid) => {
+  const loadAlertsSilent = async (sid, filterType = alertFilter) => {
     try {
-      const response = await api.get(`/alerts/session/${sid}/active`)
+      const endpoint = filterType === 'active' ? `/alerts/session/${sid}/active` : `/alerts/session/${sid}`
+      const response = await api.get(endpoint)
       setActiveAlerts(response.data)
       const countRes = await api.get(`/alerts/session/${sid}/count`)
       setAlertCounts(prev => ({ ...prev, [sid]: countRes.data.total_active }))
@@ -653,10 +770,10 @@ export default function Sessions() {
     try {
       await api.post(`/alerts/${alertId}/dismiss`, {
         note: note.trim() || 'Đã kiểm tra',
-        dismissed_by: user?.role || 'teacher'
+        dismissed_by: user?.username || 'admin'
       })
       setAlertMessage('✅ Đã tắt cảnh báo bảo mật.')
-      await loadActiveAlerts(alertModalTarget.id)
+      await loadAlerts(alertModalTarget.id, alertFilter)
       const countRes = await api.get(`/alerts/session/${alertModalTarget.id}/count`)
       setAlertCounts(prev => ({ ...prev, [alertModalTarget.id]: countRes.data.total_active }))
     } catch (error) {
@@ -1636,9 +1753,46 @@ export default function Sessions() {
 
             {/* Alerts list wrapper */}
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: 240 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 700, color: 'var(--white2)' }}>
-                <span>Cảnh báo chưa xử lý (Active)</span>
-                <span style={{ color: 'var(--red)' }}>Số lượng: {activeAlerts.length}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--bdr2)', paddingBottom: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => {
+                      setAlertFilter('active');
+                      if (alertModalTarget) loadAlerts(alertModalTarget.id, 'active');
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      minHeight: 'auto',
+                      borderRadius: '4px',
+                      background: alertFilter === 'active' ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
+                      borderColor: alertFilter === 'active' ? 'rgba(0, 201, 167, 0.35)' : 'rgba(255,255,255,0.1)',
+                      color: alertFilter === 'active' ? 'var(--teal)' : 'var(--muted)',
+                    }}
+                  >
+                    Chưa xử lý
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAlertFilter('all');
+                      if (alertModalTarget) loadAlerts(alertModalTarget.id, 'all');
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      minHeight: 'auto',
+                      borderRadius: '4px',
+                      background: alertFilter === 'all' ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
+                      borderColor: alertFilter === 'all' ? 'rgba(0, 201, 167, 0.35)' : 'rgba(255,255,255,0.1)',
+                      color: alertFilter === 'all' ? 'var(--teal)' : 'var(--muted)',
+                    }}
+                  >
+                    Tất cả
+                  </button>
+                </div>
+                <span style={{ fontSize: '12px', color: 'var(--white2)', fontWeight: 'bold' }}>
+                  Số lượng: {activeAlerts.length}
+                </span>
               </div>
 
               {alertLoading && activeAlerts.length === 0 ? (
@@ -1647,12 +1801,16 @@ export default function Sessions() {
                 </div>
               ) : activeAlerts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--muted)', fontSize: 13, border: '1px dashed var(--bdr)', borderRadius: 8 }}>
-                  Không có cảnh báo đang hoạt động.
+                  Không có cảnh báo phù hợp.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {activeAlerts.map((al) => {
                     const style = getAlertCardStyle(al.alert_type)
+                    const parsedNote = parseNoteSafely(al.note)
+                    const reasonCode = parsedNote?.reason_code || null
+                    const noteText = parsedNote ? null : al.note
+                    
                     return (
                       <div
                         key={al.id}
@@ -1667,38 +1825,7 @@ export default function Sessions() {
                         }}
                       >
                         {/* Image or fallback */}
-                        {al.captured_img ? (
-                          <img
-                            src={getImageUrl(al.captured_img)}
-                            alt="Captured"
-                            style={{
-                              width: 72,
-                              height: 72,
-                              borderRadius: 6,
-                              objectFit: 'cover',
-                              border: '1px solid rgba(255,255,255,0.1)'
-                            }}
-                            onError={(e) => {
-                              e.target.style.display = 'none'
-                              e.target.nextSibling.style.display = 'flex'
-                            }}
-                          />
-                        ) : null}
-                        <div
-                          style={{
-                            width: 72,
-                            height: 72,
-                            borderRadius: 6,
-                            background: 'rgba(255,255,255,0.05)',
-                            display: al.captured_img ? 'none' : 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 24,
-                            border: '1px solid rgba(255,255,255,0.05)'
-                          }}
-                        >
-                          ⚠️
-                        </div>
+                        <AlertImage path={al.captured_img} />
 
                         {/* Details */}
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1717,8 +1844,13 @@ export default function Sessions() {
                               {style.label}
                             </span>
                             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                              {al.created_at ? new Date(al.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
+                              {al.created_at ? new Date(al.created_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : ''}
                             </span>
+                            {al.dismissed && (
+                              <span style={{ fontSize: 10, color: 'var(--muted)', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>
+                                Đã xử lý bởi {al.dismissed_by || 'system'}
+                              </span>
+                            )}
                           </div>
 
                           {al.student_code && (
@@ -1733,36 +1865,58 @@ export default function Sessions() {
                             </div>
                           )}
 
-                          <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            {al.confidence !== null && al.confidence !== undefined && (
-                              <span>Độ tin cậy: {(al.confidence * 100).toFixed(0)}%</span>
-                            )}
+                          {reasonCode && (
+                            <div style={{ fontSize: 11, color: 'var(--white2)' }}>
+                              Mã lý do: <strong style={{ color: style.badgeColor }}>{reasonCode}</strong>
+                            </div>
+                          )}
+                          {parsedNote?.quality !== undefined && (
+                            <div style={{ fontSize: 11, color: 'var(--white2)' }}>
+                              Chất lượng: <strong>{typeof parsedNote.quality === 'number' && parsedNote.quality <= 1 ? (parsedNote.quality * 100).toFixed(0) + '%' : parsedNote.quality}</strong>
+                            </div>
+                          )}
+                          {parsedNote?.detection_confidence !== undefined && (
+                            <div style={{ fontSize: 11, color: 'var(--white2)' }}>
+                              Độ tin cậy phát hiện: <strong>{(parsedNote.detection_confidence * 100).toFixed(0)}%</strong>
+                            </div>
+                          )}
+
+                          {noteText && (
+                            <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+                              Ghi chú: {noteText}
+                            </div>
+                          )}
+
+                          <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
+                            {renderConfidence(al)}
                             {al.liveness_score !== null && al.liveness_score !== undefined && (
                               <span>Điểm kiểm tra khuôn mặt thật: {(al.liveness_score * 100).toFixed(0)}%</span>
                             )}
                             {al.gps_lat !== null && al.gps_lat !== undefined && (
-                              <span>GPS: {al.gps_lat.toFixed(4)}, {al.gps_lng.toFixed(4)}</span>
+                              <span>GPS: {al.gps_lat.toFixed(5)}, {al.gps_lng.toFixed(5)}</span>
                             )}
                           </div>
                         </div>
 
                         {/* Dismiss action */}
-                        <button
-                          className="secondary"
-                          onClick={() => handleDismissAlert(al.id)}
-                          style={{
-                            alignSelf: 'center',
-                            minHeight: 32,
-                            padding: '0 10px',
-                            fontSize: 12,
-                            borderColor: 'rgba(255,255,255,0.15)',
-                            background: 'rgba(255,255,255,0.02)',
-                            color: 'var(--white2)'
-                          }}
-                          disabled={alertLoading}
-                        >
-                          Bỏ qua
-                        </button>
+                        {!al.dismissed && (
+                          <button
+                            className="secondary"
+                            onClick={() => handleDismissAlert(al.id)}
+                            style={{
+                              alignSelf: 'center',
+                              minHeight: 32,
+                              padding: '0 10px',
+                              fontSize: 12,
+                              borderColor: 'rgba(255,255,255,0.15)',
+                              background: 'rgba(255,255,255,0.02)',
+                              color: 'var(--white2)'
+                            }}
+                            disabled={alertLoading}
+                          >
+                            Duyệt cảnh báo
+                          </button>
+                        )}
                       </div>
                     )
                   })}

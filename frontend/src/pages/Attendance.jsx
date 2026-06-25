@@ -36,7 +36,9 @@ const isOfficialStudent = (student) =>
   student?.data_source === 'real' && !student?.is_demo && student?.face_status === 'registered'
 
 const getStyle = (status) => {
+  const norm = (status || '').toUpperCase()
   if (status === 'success' || status === 'already_checked_in')   return { bg: 'rgba(0,201,167,.14)', border: 'rgba(0,201,167,.45)', accent: '#2dd4bf', text: '#f8fafc', muted: '#99f6e4', label: 'Điểm danh thành công' }
+  if (norm === 'FACE_UNCLEAR') return { bg: 'rgba(245,158,11,.14)', border: 'rgba(245,158,11,.45)', accent: '#fbbf24', text: '#f8fafc', muted: '#fde68a', label: 'Khuôn mặt chưa rõ' }
   if (status === 'not_enrolled') return { bg: 'rgba(249,115,22,.14)', border: 'rgba(249,115,22,.45)', accent: '#fb923c', text: '#f8fafc', muted: '#fed7aa', label: 'Cảnh báo điểm danh' }
   if (status === 'uncertain' || status === 'blocked') return { bg: 'rgba(245,158,11,.14)', border: 'rgba(245,158,11,.45)', accent: '#fbbf24', text: '#f8fafc', muted: '#fde68a', label: 'Điểm danh thất bại' }
   return                             { bg: 'rgba(244,63,94,.14)', border: 'rgba(244,63,94,.45)', accent: '#fb7185', text: '#f8fafc', muted: '#fecdd3', label: 'Điểm danh thất bại' }
@@ -583,11 +585,12 @@ export default function Attendance() {
       if (!bbox) return
 
       let color = '#9ca3af' // grey
-      if (face.status === 'success') {
+      const faceStatusUpper = (face.status || '').toUpperCase()
+      if (faceStatusUpper === 'SUCCESS') {
         color = '#00c9a7' // xanh (teal)
-      } else if (face.status === 'uncertain') {
+      } else if (faceStatusUpper === 'UNCERTAIN' || faceStatusUpper === 'FACE_UNCLEAR') {
         color = '#fbbf24' // vàng (amber)
-      } else if (face.status === 'spoof') {
+      } else if (faceStatusUpper === 'SPOOF') {
         color = '#f43f5e' // đỏ (red)
       }
 
@@ -739,6 +742,11 @@ export default function Attendance() {
       borderColor = 'rgba(234, 179, 8, 0.4)'
       icon = '👥'
       title = 'THIẾU ĐĂNG KÝ TỐI THIỂU'
+    } else if (typeLower === 'face_unclear') {
+      bgColor = 'rgba(245, 158, 11, 0.95)'
+      borderColor = 'rgba(245, 158, 11, 0.4)'
+      icon = '🔍'
+      title = 'KHUÔN MẶT CHƯA RÕ'
     }
 
     return (
@@ -915,9 +923,51 @@ export default function Attendance() {
           liveness_label,
           liveness_threshold,
           capture_path,
+          reason_code,
+          detection_confidence,
+          detection_confidence_percent,
+          retry_allowed,
         } = recRes.data
         const recognizedStudent = student || null
         const recognizedCode = recognizedStudent?.student_code || student_code
+
+        const statusUpper = (status || '').toUpperCase()
+        if (statusUpper === 'FACE_UNCLEAR') {
+          const fallbackMsg = "Khuôn mặt chưa rõ. Vui lòng tháo khẩu trang nếu có, nhìn thẳng vào camera và thử lại."
+          const finalMsg = msg || fallbackMsg
+          const guidance = "Đưa mặt vào giữa khung, đảm bảo đủ sáng, không che mặt và nhìn thẳng camera."
+          
+          const activeResults = results || [{
+            confidence: null,
+            status: 'FACE_UNCLEAR',
+            bbox: null,
+          }]
+          drawBoundingBoxes(activeResults)
+
+          setResult({
+            success: false,
+            status: 'FACE_UNCLEAR',
+            message: finalMsg,
+            guidance: guidance,
+            reasonCode: reason_code || null,
+            detectionConfidence: detection_confidence ?? null,
+            detectionConfidencePercent: detection_confidence_percent || (detection_confidence ? `${(detection_confidence * 100).toFixed(0)}%` : null),
+            retryAllowed: retry_allowed !== false,
+          })
+
+          const showFeedback = shouldShowAutoFeedback(isAuto, 'FACE_UNCLEAR', 'FACE_UNCLEAR')
+          if (showFeedback) {
+            setMessage(finalMsg)
+            setAlertToast({
+              type: 'face_unclear',
+              message: finalMsg,
+              alertId: recRes.data.alert_id,
+              alertType: recRes.data.alert_type || 'FACE_UNCLEAR',
+            })
+          }
+          if (window.innerWidth < 768) setMobileStep(4)
+          return
+        }
 
         // Draw bounding boxes on overlay canvas (fallback compatible with legacy endpoints)
         const activeResults = results || (recognizedCode ? [{
@@ -1484,7 +1534,7 @@ export default function Attendance() {
                 {style.label}
               </div>
               
-              {result?.studentCode && (
+              {result?.studentCode && result.status !== 'FACE_UNCLEAR' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
                   <div><strong>Mã SV:</strong> {result.studentCode}</div>
                   {result.student?.full_name && <div><strong>Tên SV:</strong> {result.student.full_name}</div>}
@@ -1503,6 +1553,34 @@ export default function Attendance() {
                 </div>
               )}
 
+              {result?.status === 'FACE_UNCLEAR' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
+                  <div style={{ fontWeight: 600, color: style.accent }}>Hướng dẫn:</div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.5' }}>{result.guidance}</div>
+                  {(result.detectionConfidencePercent || result.reasonCode) && (
+                    <div style={{ 
+                      marginTop: '8px', 
+                      padding: '8px', 
+                      borderRadius: '4px', 
+                      background: 'rgba(255, 255, 255, 0.03)', 
+                      fontSize: '11px', 
+                      color: 'rgba(248, 250, 252, 0.6)', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '4px' 
+                    }}>
+                      <div style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '9px', tracking: '0.05em' }}>Thông tin chi tiết:</div>
+                      {result.detectionConfidencePercent && (
+                        <div>Đồ tin cậy phát hiện khuôn mặt: {result.detectionConfidencePercent}</div>
+                      )}
+                      {result.reasonCode && (
+                        <div>Mã lý do: {result.reasonCode}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <p style={{ fontSize: '13px', color: style.muted, margin: '8px 0 0 0' }}>
                 {result?.message || message}
               </p>
@@ -1513,8 +1591,22 @@ export default function Attendance() {
                 </div>
               )}
 
+              {result?.status === 'FACE_UNCLEAR' && result?.retryAllowed && (
+                <button
+                  style={{ marginTop: '14px', minHeight: 48, width: '100%', justifyContent: 'center' }}
+                  onClick={() => {
+                    setResult(null)
+                    setMobileStep(3)
+                    startCamera()
+                  }}
+                >
+                  Thử lại ngay
+                </button>
+              )}
+
               <button
-                style={{ marginTop: '14px', minHeight: 48, width: '100%', justifyContent: 'center' }}
+                className={result?.status === 'FACE_UNCLEAR' && result?.retryAllowed ? 'secondary' : ''}
+                style={{ marginTop: result?.status === 'FACE_UNCLEAR' && result?.retryAllowed ? '8px' : '14px', minHeight: 48, width: '100%', justifyContent: 'center' }}
                 onClick={() => {
                   stopCamera()
                   setResult(null)
@@ -1708,23 +1800,56 @@ export default function Attendance() {
                     color: getStyle(result.status).text,
                   }}>
                     <p style={{ fontWeight: 800, marginTop: 0, color: getStyle(result.status).accent }}>{getStyle(result.status).label}</p>
-                    <p>Tên sinh viên: {result.student?.full_name || '-'}</p>
-                    <p>Mã SV: {result.studentCode}</p>
-                    <p>Lớp: {result.student?.class_name || '-'}</p>
-                    <p>Lớp học phần: {selectedSession?.section_code || selectedSession?.class_name || '-'}</p>
-                    <p>Buổi học đang điểm danh: {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</p>
-                    <p>Độ tin cậy: {formatConf(result.confidence)}</p>
-                    <p>{getLivenessStatusText(result)}</p>
-                    {getLivenessScoreText(result.livenessScore) && (
-                      <p>{getLivenessScoreText(result.livenessScore)}</p>
+                    
+                    {result.status === 'FACE_UNCLEAR' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px', marginBottom: '12px' }}>
+                        <div style={{ fontWeight: 600, color: getStyle(result.status).accent }}>Hướng dẫn:</div>
+                        <div style={{ fontSize: '13px', lineHeight: '1.5' }}>{result.guidance}</div>
+                        
+                        {(result.detectionConfidencePercent || result.reasonCode) && (
+                          <div style={{ 
+                            marginTop: '8px', 
+                            padding: '8px', 
+                            borderRadius: '4px', 
+                            background: 'rgba(255, 255, 255, 0.03)', 
+                            fontSize: '11px', 
+                            color: 'rgba(248, 250, 252, 0.6)', 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            gap: '4px' 
+                          }}>
+                            <div style={{ fontWeight: 'bold', textTransform: 'uppercase', fontSize: '9px', tracking: '0.05em' }}>Thông tin chi tiết:</div>
+                            {result.detectionConfidencePercent && (
+                              <div>Độ tin cậy phát hiện khuôn mặt: {result.detectionConfidencePercent}</div>
+                            )}
+                            {result.reasonCode && (
+                              <div>Mã lý do: {result.reasonCode}</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <p>Tên sinh viên: {result.student?.full_name || '-'}</p>
+                        <p>Mã SV: {result.studentCode}</p>
+                        <p>Lớp: {result.student?.class_name || '-'}</p>
+                        <p>Lớp học phần: {selectedSession?.section_code || selectedSession?.class_name || '-'}</p>
+                        <p>Buổi học đang điểm danh: {selectedSession?.session_number ? `Buổi ${selectedSession.session_number}` : selectedSession?.subject_name || selectedSession?.subject || '-'}</p>
+                        <p>Độ tin cậy: {formatConf(result.confidence)}</p>
+                        <p>{getLivenessStatusText(result)}</p>
+                        {getLivenessScoreText(result.livenessScore) && (
+                          <p>{getLivenessScoreText(result.livenessScore)}</p>
+                        )}
+                        {getLivenessThresholdText(result.livenessThreshold) && (
+                          <p>{getLivenessThresholdText(result.livenessThreshold)}</p>
+                        )}
+                        {result.success && result.action && (
+                          <p>Trạng thái ghi nhận: Đã ghi nhận {actionLabels[result.action]}</p>
+                        )}
+                      </>
                     )}
-                    {getLivenessThresholdText(result.livenessThreshold) && (
-                      <p>{getLivenessThresholdText(result.livenessThreshold)}</p>
-                    )}
-                    {result.success && result.action && (
-                      <p>Trạng thái ghi nhận: Đã ghi nhận {actionLabels[result.action]}</p>
-                    )}
-                    <p style={{ color: getStyle(result.status).muted }}>
+
+                    <p style={{ color: getStyle(result.status).muted, marginTop: '8px' }}>
                       {result.message}
                     </p>
                     {isNotEnrolledAlert(result.status, result.alertType) && (

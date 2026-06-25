@@ -6,6 +6,8 @@ export const recognitionStatusLabels = {
   multiple_faces: 'Phát hiện nhiều khuôn mặt',
   class_mismatch: 'Khác lớp chính của buổi học',
   invalid_image: 'Ảnh không hợp lệ',
+  face_unclear: 'Khuôn mặt chưa rõ',
+  FACE_UNCLEAR: 'Khuôn mặt chưa rõ',
 }
 
 export const attendanceStatusLabels = {

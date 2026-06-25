@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -53,11 +54,25 @@ def create_alert(
     gps_lat: float | None = None,
     gps_lng: float | None = None,
     reason_code: str | None = None,
+    quality_details: dict | None = None,
     note: str | None = None,
 ):
     normalized_type = alert_type.upper()
     if normalized_type not in ALERT_TYPES:
         raise ValueError(f"Unsupported security alert type: {alert_type}")
+
+    alert_note = note
+    if alert_note is None and normalized_type == "FACE_UNCLEAR":
+        alert_note = json.dumps(
+            {
+                "reason_code": reason_code,
+                "detection_confidence": confidence,
+                "quality": quality_details,
+            },
+            ensure_ascii=False,
+        )
+    elif alert_note is None and reason_code:
+        alert_note = f"reason_code={reason_code}"
 
     alert = SecurityAlert(
         session_id=session_id,
@@ -73,7 +88,7 @@ def create_alert(
         liveness_score=liveness_score,
         gps_lat=gps_lat,
         gps_lng=gps_lng,
-        note=note or (f"reason_code={reason_code}" if reason_code else None),
+        note=alert_note,
     )
     db.add(alert)
     db.commit()

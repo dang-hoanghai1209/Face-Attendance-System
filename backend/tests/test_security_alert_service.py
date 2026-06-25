@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from datetime import date
@@ -106,7 +107,10 @@ class SecurityAlertServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(alert.alert_type, "FACE_UNCLEAR")
-        self.assertEqual(alert.note, "reason_code=LANDMARK_GEOMETRY_INVALID")
+        note = json.loads(alert.note)
+        self.assertEqual(note["reason_code"], "LANDMARK_GEOMETRY_INVALID")
+        self.assertEqual(note["detection_confidence"], 0.88)
+        self.assertIsNone(note["quality"])
         self.assertIsNotNone(alert.captured_img)
         self.assertTrue(alert.captured_img.startswith(f"media/security_snapshots/{session.id}/"))
         self.assertTrue(alert.captured_img.endswith("_LANDMARK_GEOMETRY_INVALID.jpg"))

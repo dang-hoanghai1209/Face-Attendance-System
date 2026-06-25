@@ -1,5 +1,6 @@
 import io
 import importlib
+import json
 import os
 import unittest
 from datetime import date, time
@@ -241,6 +242,10 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertTrue(result["retry_allowed"])
         self.assertFalse(result["official_attendance_allowed"])
         self.assertFalse(result["recognized"])
+        self.assertIsNone(result["confidence"])
+        self.assertIsNone(result["confidence_percent"])
+        self.assertEqual(result["detection_confidence"], 0.98)
+        self.assertEqual(result["detection_confidence_percent"], "98%")
         self.assertEqual(result["student_code"], None)
         self.assertEqual(result["results"], [])
         self.assertEqual(result["face_count"], 1)
@@ -251,7 +256,11 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(alert.alert_type, "FACE_UNCLEAR")
         self.assertEqual(alert.session_id, session.id)
         self.assertEqual(alert.confidence, 0.98)
-        self.assertEqual(alert.note, "reason_code=LOW_SHARPNESS")
+        alert_note = json.loads(alert.note)
+        self.assertEqual(alert_note["reason_code"], "LOW_SHARPNESS")
+        self.assertEqual(alert_note["detection_confidence"], 0.98)
+        self.assertEqual(alert_note["quality"]["sharpness"], 2.0)
+        self.assertEqual(alert_note["quality"]["landmark_geometry_valid"], True)
         self.assertTrue(alert.captured_img.startswith(f"media/security_snapshots/{session.id}/"))
         self.assertTrue(alert.captured_img.endswith("_LOW_SHARPNESS.jpg"))
         saved_path = security_alert_service.BASE_DIR / alert.captured_img

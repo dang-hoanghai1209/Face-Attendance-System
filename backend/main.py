@@ -434,6 +434,8 @@ def _recognize_uploaded_face_multi(
             "message": message,
         }
 
+    # Keep quality after liveness for this sprint to preserve existing spoof/error semantics.
+    # The quality gate still runs before embedding, and landmarks are used only for image checks.
     quality_result = evaluate_uploaded_face_quality(image_data)
     if quality_result and not quality_result.get("face_detected"):
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
@@ -507,6 +509,7 @@ def _recognize_uploaded_face_multi(
                         image_bytes=image_data,
                         confidence=quality_result.get("detection_probability"),
                         reason_code=reason_code,
+                        quality_details=quality_result.get("metrics"),
                     )
             finally:
                 db.close()
@@ -522,8 +525,10 @@ def _recognize_uploaded_face_multi(
             "is_demo": None,
             "registration_method": None,
             "student": None,
-            "confidence": quality_result.get("detection_probability", -1.0),
-            "confidence_percent": f"{max(quality_result.get('detection_probability') or 0.0, 0.0):.0%}",
+            "confidence": None,
+            "confidence_percent": None,
+            "detection_confidence": quality_result.get("detection_probability"),
+            "detection_confidence_percent": f"{max(quality_result.get('detection_probability') or 0.0, 0.0):.0%}",
             "liveness_score": liveness_score,
             "liveness_passed": liveness_passed,
             "liveness_label": liveness_label,

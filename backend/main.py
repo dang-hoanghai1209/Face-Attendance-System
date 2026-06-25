@@ -1,5 +1,6 @@
 import os
 import csv
+import io
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from PIL import UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 import uvicorn
 
 from database import SessionLocal
@@ -23,6 +24,7 @@ from face_service import (
     count_faces_in_image_bytes,
     face_models_loaded,
     fetch_db_embeddings,
+    get_face_models,
     image_bytes_to_face_embeddings,
     image_bytes_to_embedding,
     load_legacy_embeddings,
@@ -43,6 +45,8 @@ from routes import alerts, attendance, auth, classrooms, course_sections, enroll
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
 from services.attendance_service import OFFICIAL_ATTENDANCE_BLOCK_MESSAGE
+from services.face_quality_service import evaluate_face_quality, load_face_quality_thresholds_from_env
+from services.security_alert_service import create_alert
 from services.timezone_service import configured_timezone_name, resolved_timezone_name
 
 
@@ -54,6 +58,7 @@ DB_PATH = os.path.join(BASE_DIR, "data", "embedding_db.pkl")
 MODEL_TEST_LOG_PATH = Path(BASE_DIR) / "reports" / "model_test_log.csv"
 MEDIA_DIR = Path(BASE_DIR) / "media"
 legacy_embeddings = {}
+FACE_UNCLEAR_MESSAGE = "Khuôn mặt chưa rõ. Vui lòng tháo khẩu trang nếu có, nhìn thẳng vào camera và thử lại."
 
 
 @asynccontextmanager
@@ -119,6 +124,60 @@ def _save_capture_safely(image_data: bytes, filename: str | None):
         return save_recognition_capture(image_data, filename)
     except Exception:
         return None
+
+
+def _plain_bbox(box):
+    x1, y1, x2, y2 = [float(value) for value in box]
+    return {
+        "x": int(round(x1)),
+        "y": int(round(y1)),
+        "w": int(round(max(x2 - x1, 0.0))),
+        "h": int(round(max(y2 - y1, 0.0))),
+    }
+
+
+def evaluate_uploaded_face_quality(image_data: bytes):
+    try:
+        image = Image.open(io.BytesIO(image_data)).convert("RGB")
+    except UnidentifiedImageError:
+        return None
+
+    detector, _embedder = get_face_models()
+    boxes, probabilities, landmarks = detector.detect(image, landmarks=True)
+    if boxes is None or len(boxes) == 0:
+        return {"face_detected": False, "face_count": 0}
+
+    face_items = []
+    for index, box in enumerate(boxes):
+        probability = probabilities[index] if probabilities is not None else 0.0
+        face_items.append((float(probability or 0.0), index, box))
+    face_items.sort(key=lambda item: item[0], reverse=True)
+
+    probability, index, bbox = face_items[0]
+    face_landmarks = landmarks[index] if landmarks is not None else None
+    quality = evaluate_face_quality(
+        image,
+        bbox,
+        probability,
+        face_landmarks,
+        thresholds=load_face_quality_thresholds_from_env(),
+    )
+    return {
+        "face_detected": True,
+        "face_count": len(boxes),
+        "bbox": _plain_bbox(bbox),
+        "detection_probability": round(probability, 4),
+        "reason_code": quality.reason_code,
+        "final_result": quality.final_result,
+        "passed": quality.passed,
+        "metrics": {
+            "sharpness": quality.metrics.sharpness,
+            "brightness": quality.metrics.brightness,
+            "face_size_ratio": quality.metrics.face_size_ratio,
+            "yaw_estimate": quality.metrics.yaw_estimate,
+            "landmark_geometry_valid": quality.metrics.landmark_geometry_valid,
+        },
+    }
 
 
 def _audit_recognition_safely(
@@ -373,6 +432,123 @@ def _recognize_uploaded_face_multi(
             "results": [],
             "face_count": 0,
             "message": message,
+        }
+
+    quality_result = evaluate_uploaded_face_quality(image_data)
+    if quality_result and not quality_result.get("face_detected"):
+        processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
+        audit_id = None
+        if audit_recognition:
+            db = SessionLocal()
+            try:
+                attempt = _audit_recognition_safely(
+                    db,
+                    session_id=session_id,
+                    confidence=-1.0,
+                    status="no_face",
+                    image_path=capture_path,
+                    message="Khong phat hien khuon mat trong anh.",
+                )
+                audit_id = attempt.id if attempt else None
+            finally:
+                db.close()
+
+        return {
+            "status": "no_face",
+            "student_id": None,
+            "student_code": None,
+            "sample_code": None,
+            "full_name": None,
+            "data_source": None,
+            "is_demo": None,
+            "registration_method": None,
+            "student": None,
+            "confidence": -1.0,
+            "confidence_percent": "0%",
+            "liveness_score": liveness_score,
+            "liveness_passed": liveness_passed,
+            "liveness_label": liveness_label,
+            "liveness_threshold": liveness_threshold,
+            "liveness_debug": liveness_debug,
+            "official_attendance_allowed": False,
+            "official_attendance_warning": None,
+            "processing_time_ms": processing_time_ms,
+            "processing_ms": processing_time_ms,
+            "audit_id": audit_id,
+            "capture_path": capture_path,
+            "results": [],
+            "face_count": 0,
+            "message": "Khong phat hien khuon mat trong anh. Vui long chon anh ro mat hon.",
+        }
+
+    if quality_result and not quality_result.get("passed", True):
+        processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
+        reason_code = quality_result.get("reason_code") or "LOW_FACE_QUALITY"
+        audit_id = None
+        alert = None
+        if audit_recognition or (official_mode and session_id is not None):
+            db = SessionLocal()
+            try:
+                if audit_recognition:
+                    attempt = _audit_recognition_safely(
+                        db,
+                        session_id=session_id,
+                        confidence=quality_result.get("detection_probability"),
+                        status="FACE_UNCLEAR",
+                        image_path=capture_path,
+                        message=FACE_UNCLEAR_MESSAGE,
+                    )
+                    audit_id = attempt.id if attempt else None
+                if official_mode and session_id is not None:
+                    alert = create_alert(
+                        db,
+                        session_id=session_id,
+                        alert_type="FACE_UNCLEAR",
+                        image_bytes=image_data,
+                        confidence=quality_result.get("detection_probability"),
+                        reason_code=reason_code,
+                    )
+            finally:
+                db.close()
+
+        snapshot_path = alert.captured_img if alert else None
+        return {
+            "status": "FACE_UNCLEAR",
+            "student_id": None,
+            "student_code": None,
+            "sample_code": None,
+            "full_name": None,
+            "data_source": None,
+            "is_demo": None,
+            "registration_method": None,
+            "student": None,
+            "confidence": quality_result.get("detection_probability", -1.0),
+            "confidence_percent": f"{max(quality_result.get('detection_probability') or 0.0, 0.0):.0%}",
+            "liveness_score": liveness_score,
+            "liveness_passed": liveness_passed,
+            "liveness_label": liveness_label,
+            "liveness_threshold": liveness_threshold,
+            "liveness_debug": liveness_debug,
+            "official_attendance_allowed": False,
+            "official_attendance_warning": FACE_UNCLEAR_MESSAGE,
+            "official_attendance_warning_code": "FACE_UNCLEAR",
+            "recognized": False,
+            "reason": "FACE_UNCLEAR",
+            "reason_code": reason_code,
+            "retry_allowed": True,
+            "session_id": session_id,
+            "processing_time_ms": processing_time_ms,
+            "processing_ms": processing_time_ms,
+            "audit_id": audit_id,
+            "alert_id": alert.id if alert else None,
+            "alert_type": alert.alert_type if alert else None,
+            "snapshot_path": snapshot_path,
+            "capture_path": capture_path,
+            "bbox": quality_result.get("bbox"),
+            "quality": quality_result,
+            "results": [],
+            "face_count": quality_result.get("face_count", 0),
+            "message": FACE_UNCLEAR_MESSAGE,
         }
 
     try:

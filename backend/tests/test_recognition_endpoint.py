@@ -16,9 +16,10 @@ import main
 from database import Base, SessionLocal, engine
 from models.attendance import Attendance
 from models.recognition_attempt import RecognitionAttempt
+from models.security_alert import SecurityAlert
 from models.session import Session as ClassSession
 from models.student import Student
-from services import attendance_service, report_service
+from services import attendance_service, report_service, security_alert_service
 
 
 class RecognitionEndpointTests(unittest.TestCase):
@@ -29,6 +30,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.original_check_liveness = main.check_liveness
         self.original_image_bytes_to_embedding = main.image_bytes_to_embedding
         self.original_image_bytes_to_face_embeddings = main.image_bytes_to_face_embeddings
+        self.original_evaluate_uploaded_face_quality = main.evaluate_uploaded_face_quality
         self.original_count_faces = main.count_faces_in_image_bytes
         self.original_fetch_db_embeddings = main.fetch_db_embeddings
         self.original_match_embedding = main.match_embedding
@@ -46,6 +48,7 @@ class RecognitionEndpointTests(unittest.TestCase):
         main.check_liveness = self.original_check_liveness
         main.image_bytes_to_embedding = self.original_image_bytes_to_embedding
         main.image_bytes_to_face_embeddings = self.original_image_bytes_to_face_embeddings
+        main.evaluate_uploaded_face_quality = self.original_evaluate_uploaded_face_quality
         main.count_faces_in_image_bytes = self.original_count_faces
         main.fetch_db_embeddings = self.original_fetch_db_embeddings
         main.match_embedding = self.original_match_embedding
@@ -210,6 +213,53 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertIsNotNone(result["audit_id"])
         audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
         self.assertEqual(audit.status, "spoof")
+
+    def test_recognize_quality_fail_returns_face_unclear_without_embedding_and_alerts(self):
+        session = self.add_session()
+        main.evaluate_uploaded_face_quality = lambda _image: {
+            "face_detected": True,
+            "face_count": 1,
+            "bbox": {"x": 10, "y": 20, "w": 80, "h": 90},
+            "detection_probability": 0.98,
+            "reason_code": "LOW_SHARPNESS",
+            "final_result": "FACE_UNCLEAR",
+            "passed": False,
+            "metrics": {
+                "sharpness": 2.0,
+                "brightness": 120.0,
+                "face_size_ratio": 0.2,
+                "yaw_estimate": 0.0,
+                "landmark_geometry_valid": True,
+            },
+        }
+        main.image_bytes_to_face_embeddings = lambda _image: self.fail("Embedding should not run when quality fails")
+
+        result = main._recognize_uploaded_face(file=self.upload(b"unclear-image"), session_id=session.id)
+
+        self.assertEqual(result["status"], "FACE_UNCLEAR")
+        self.assertEqual(result["reason_code"], "LOW_SHARPNESS")
+        self.assertTrue(result["retry_allowed"])
+        self.assertFalse(result["official_attendance_allowed"])
+        self.assertFalse(result["recognized"])
+        self.assertEqual(result["student_code"], None)
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["face_count"], 1)
+        self.assertEqual(result["message"], main.FACE_UNCLEAR_MESSAGE)
+        self.assertEqual(self.db.query(Attendance).count(), 0)
+
+        alert = self.db.query(SecurityAlert).filter(SecurityAlert.id == result["alert_id"]).one()
+        self.assertEqual(alert.alert_type, "FACE_UNCLEAR")
+        self.assertEqual(alert.session_id, session.id)
+        self.assertEqual(alert.confidence, 0.98)
+        self.assertEqual(alert.note, "reason_code=LOW_SHARPNESS")
+        self.assertTrue(alert.captured_img.startswith(f"media/security_snapshots/{session.id}/"))
+        self.assertTrue(alert.captured_img.endswith("_LOW_SHARPNESS.jpg"))
+        saved_path = security_alert_service.BASE_DIR / alert.captured_img
+        self.assertTrue(saved_path.exists())
+        saved_path.unlink()
+
+        audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
+        self.assertEqual(audit.status, "FACE_UNCLEAR")
 
     def test_recognize_liveness_error_returns_spoof_without_recognition(self):
         session = self.add_session()

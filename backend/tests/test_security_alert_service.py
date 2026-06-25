@@ -92,6 +92,29 @@ class SecurityAlertServiceTests(unittest.TestCase):
         self.assertTrue(saved_path.exists())
         self.assertEqual(saved_path.read_bytes(), image_bytes)
 
+    def test_create_face_unclear_alert_saves_security_snapshot_with_reason_code(self):
+        session = self.add_session()
+        image_bytes = b"unclear-face-bytes"
+
+        alert = security_alert_service.create_alert(
+            self.db,
+            session_id=session.id,
+            alert_type="FACE_UNCLEAR",
+            image_bytes=image_bytes,
+            confidence=0.88,
+            reason_code="LANDMARK_GEOMETRY_INVALID",
+        )
+
+        self.assertEqual(alert.alert_type, "FACE_UNCLEAR")
+        self.assertEqual(alert.note, "reason_code=LANDMARK_GEOMETRY_INVALID")
+        self.assertIsNotNone(alert.captured_img)
+        self.assertTrue(alert.captured_img.startswith(f"media/security_snapshots/{session.id}/"))
+        self.assertTrue(alert.captured_img.endswith("_LANDMARK_GEOMETRY_INVALID.jpg"))
+        saved_path = security_alert_service.BASE_DIR / Path(alert.captured_img)
+        self.created_files.append(saved_path)
+        self.assertTrue(saved_path.exists())
+        self.assertEqual(saved_path.read_bytes(), image_bytes)
+
     def test_create_alert_persists_student_liveness_and_gps_fields(self):
         session = self.add_session()
         student = self.add_student()

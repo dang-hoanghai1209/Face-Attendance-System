@@ -1,4 +1,6 @@
 import io
+import csv
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +15,9 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
 from database import get_db
+from models.attendance import Attendance
+from models.security_alert import SecurityAlert
+from models.student import Student
 from services.auth_service import get_current_user, require_admin
 from services import report_service
 
@@ -96,11 +101,173 @@ SESSION_COLUMNS = {
     "note": "Ghi chú",
 }
 
+ATTENDANCE_CSV_COLUMNS = [
+    "session_id",
+    "class_name",
+    "student_code",
+    "full_name",
+    "attendance_status",
+    "check_in_at",
+    "check_out_at",
+    "check_in_conf",
+    "check_out_conf",
+    "liveness_passed",
+    "gps_lat",
+    "gps_lng",
+    "gps_accuracy",
+    "distance_meters",
+    "check_in_img",
+    "scan_count",
+    "last_scan_at",
+    "note",
+    "created_at",
+]
+SECURITY_ALERT_CSV_COLUMNS = [
+    "alert_id",
+    "session_id",
+    "alert_type",
+    "reason_code",
+    "student_code",
+    "full_name",
+    "class_name",
+    "confidence_label",
+    "confidence",
+    "liveness_score",
+    "gps_lat",
+    "gps_lng",
+    "captured_img",
+    "dismissed",
+    "dismissed_by",
+    "dismissed_at",
+    "note",
+    "created_at",
+]
+
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
 def _safe_filename(value: str):
     return "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in value).strip("_")
+
+
+def _csv_value(value):
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _csv_response(rows, fieldnames, filename):
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(stream, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: _csv_value(row.get(field)) for field in fieldnames})
+    output = io.BytesIO(stream.getvalue().encode("utf-8-sig"))
+    return StreamingResponse(
+        output,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def _parse_alert_note(note):
+    if not note:
+        return None, ""
+    try:
+        parsed = json.loads(note)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None, note
+    if not isinstance(parsed, dict):
+        return None, note
+    return parsed.get("reason_code"), note
+
+
+def _confidence_label(alert_type):
+    normalized = (alert_type or "").upper()
+    if normalized == "FACE_UNCLEAR":
+        return "Độ tin cậy phát hiện khuôn mặt"
+    if normalized in {"UNKNOWN_FACE", "UNKNOWN"}:
+        return "Độ tin cậy khớp danh tính"
+    if normalized == "SPOOF":
+        return "Độ tin cậy cảnh báo"
+    return "Độ tin cậy"
+
+
+def _attendance_csv_rows(session, report_rows, db: Session):
+    record_ids = [row.get("record_id") for row in report_rows if row.get("record_id")]
+    records = {}
+    if record_ids:
+        records = {
+            record.id: record
+            for record in db.query(Attendance).filter(Attendance.id.in_(record_ids)).all()
+        }
+
+    rows = []
+    for row in report_rows:
+        record = records.get(row.get("record_id"))
+        rows.append(
+            {
+                "session_id": session.id,
+                "class_name": row.get("class_name") or session.class_name,
+                "student_code": row.get("student_code"),
+                "full_name": row.get("full_name"),
+                "attendance_status": row.get("status"),
+                "check_in_at": record.check_in_at if record else row.get("check_in_at"),
+                "check_out_at": record.check_out_at if record else row.get("check_out_at"),
+                "check_in_conf": record.check_in_conf if record else row.get("check_in_conf"),
+                "check_out_conf": record.check_out_conf if record else row.get("check_out_conf"),
+                "liveness_passed": record.liveness_passed if record else None,
+                "gps_lat": record.gps_lat if record else None,
+                "gps_lng": record.gps_lng if record else None,
+                "gps_accuracy": record.gps_accuracy if record else None,
+                "distance_meters": record.distance_meters if record else None,
+                "check_in_img": record.check_in_img if record else None,
+                "scan_count": record.scan_count if record else None,
+                "last_scan_at": record.last_scan_at if record else None,
+                "note": record.note if record else row.get("note"),
+                "created_at": record.created_at if record else None,
+            }
+        )
+    return rows
+
+
+def _security_alert_csv_rows(session_id: int, db: Session):
+    alerts = (
+        db.query(SecurityAlert, Student)
+        .outerjoin(Student, SecurityAlert.student_id == Student.id)
+        .filter(SecurityAlert.session_id == session_id)
+        .order_by(SecurityAlert.created_at.asc(), SecurityAlert.id.asc())
+        .all()
+    )
+
+    rows = []
+    for alert, student in alerts:
+        reason_code, note = _parse_alert_note(alert.note)
+        rows.append(
+            {
+                "alert_id": alert.id,
+                "session_id": alert.session_id,
+                "alert_type": alert.alert_type,
+                "reason_code": reason_code,
+                "student_code": student.student_code if student else None,
+                "full_name": student.full_name if student else None,
+                "class_name": student.class_name if student else None,
+                "confidence_label": _confidence_label(alert.alert_type),
+                "confidence": alert.confidence,
+                "liveness_score": alert.liveness_score,
+                "gps_lat": alert.gps_lat,
+                "gps_lng": alert.gps_lng,
+                "captured_img": alert.captured_img,
+                "dismissed": alert.dismissed,
+                "dismissed_by": alert.dismissed_by,
+                "dismissed_at": alert.dismissed_at,
+                "note": note,
+                "created_at": alert.created_at,
+            }
+        )
+    return rows
 
 
 def _new_pdf(stream):
@@ -548,6 +715,26 @@ def export_warning_excel(class_name: str, current_user=Depends(get_current_user)
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}.xlsx"},
     )
+
+
+@router.get("/export/csv/session/{session_id}")
+def export_session_csv(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    session, rows = report_service.build_session_report_for_user(session_id, db, current_user)
+    csv_rows = _attendance_csv_rows(session, rows, db)
+    filename = _safe_filename(
+        f"attendance_session_{session.id}_{session.class_name}_{session.session_date}"
+    ) or f"attendance_session_{session.id}"
+    return _csv_response(csv_rows, ATTENDANCE_CSV_COLUMNS, f"{filename}.csv")
+
+
+@router.get("/export/csv/session/{session_id}/alerts")
+def export_session_alerts_csv(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    session, _rows = report_service.build_session_report_for_user(session_id, db, current_user)
+    csv_rows = _security_alert_csv_rows(session_id, db)
+    filename = _safe_filename(
+        f"security_alerts_session_{session.id}_{session.class_name}_{session.session_date}"
+    ) or f"security_alerts_session_{session.id}"
+    return _csv_response(csv_rows, SECURITY_ALERT_CSV_COLUMNS, f"{filename}.csv")
 
 
 @router.get("/export/excel/session/{session_id}")

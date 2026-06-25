@@ -1,4 +1,8 @@
 import os
+import asyncio
+import csv
+import io
+import json
 import unittest
 from datetime import date, datetime, time
 
@@ -12,9 +16,11 @@ from models.attendance_scan import AttendanceScan
 from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.enrollment import Enrollment
+from models.security_alert import SecurityAlert
 from models.session import Session as ClassSession
 from models.student import Student
 from models.subject import Subject
+from routes import reports
 from services import attendance_service, report_service
 from services import timezone_service
 
@@ -88,6 +94,15 @@ class AttendanceReportServiceTests(unittest.TestCase):
                 if not exists:
                     self.db.add(Enrollment(session_id=session.id, student_id=student.id, status="active"))
         self.db.commit()
+
+    def collect_streaming_response(self, response):
+        async def collect():
+            chunks = []
+            async for chunk in response.body_iterator:
+                chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode())
+            return b"".join(chunks)
+
+        return asyncio.run(collect())
 
     def add_min_session_enrollments(self, session, student, total=5):
         students = [student]
@@ -199,6 +214,87 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(scans[0].gps_lng, session.longitude)
         self.assertTrue(scans[0].liveness_passed)
         self.assertEqual(scans[0].note, "check_in")
+
+    def test_export_session_csv_returns_utf8_bom_and_attendance_columns(self):
+        student = self.add_student()
+        session = self.add_session()
+        self.add_min_session_enrollments(session, student)
+        self.patch_now(datetime(2026, 5, 30, 7, 31))
+        response_data = attendance_service.record_checkin(
+            self.db,
+            student.student_code,
+            session.id,
+            confidence=0.91,
+            image_path="media/captures/checkin.jpg",
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+            gps_accuracy=8.5,
+            liveness_passed=True,
+        )
+        record = self.db.query(Attendance).filter(Attendance.id == response_data["data"]["record_id"]).first()
+        record.note = "checked by camera"
+        self.db.commit()
+
+        user = type("User", (), {"role": "admin"})()
+        response = reports.export_session_csv(session.id, current_user=user, db=self.db)
+        body = self.collect_streaming_response(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.media_type)
+        self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertTrue(body.startswith(b"\xef\xbb\xbf"))
+        csv_text = body.decode("utf-8-sig")
+        self.assertIn("session_id,class_name,student_code,full_name,attendance_status", csv_text.splitlines()[0])
+        self.assertIn("liveness_passed", csv_text.splitlines()[0])
+        self.assertIn("gps_lat", csv_text.splitlines()[0])
+        self.assertIn("check_in_img", csv_text.splitlines()[0])
+        self.assertIn(student.student_code, csv_text)
+        self.assertIn("checked by camera", csv_text)
+
+    def test_export_session_alerts_csv_parses_json_reason_code_and_handles_text_note(self):
+        student = self.add_student()
+        session = self.add_session()
+        self.add_session_enrollments(session, [student])
+        json_alert = SecurityAlert(
+            session_id=session.id,
+            alert_type="FACE_UNCLEAR",
+            student_id=student.id,
+            captured_img="media/security_snapshots/1/face.jpg",
+            confidence=0.88,
+            liveness_score=0.77,
+            gps_lat=12.1,
+            gps_lng=109.1,
+            note=json.dumps({"reason_code": "LOW_SHARPNESS", "quality": {"sharpness": 2.0}}),
+        )
+        text_alert = SecurityAlert(
+            session_id=session.id,
+            alert_type="UNKNOWN_FACE",
+            captured_img="media/alerts/1/unknown.jpg",
+            confidence=0.41,
+            note="plain text note",
+        )
+        self.db.add_all([json_alert, text_alert])
+        self.db.commit()
+
+        user = type("User", (), {"role": "admin"})()
+        response = reports.export_session_alerts_csv(session.id, current_user=user, db=self.db)
+        body = self.collect_streaming_response(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.media_type)
+        self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertTrue(body.startswith(b"\xef\xbb\xbf"))
+        csv_text = body.decode("utf-8-sig")
+        header = csv_text.splitlines()[0]
+        self.assertIn("alert_id,session_id,alert_type,reason_code", header)
+        self.assertIn("confidence_label", header)
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+        by_type = {row["alert_type"]: row for row in rows}
+        self.assertEqual(by_type["FACE_UNCLEAR"]["reason_code"], "LOW_SHARPNESS")
+        self.assertEqual(by_type["FACE_UNCLEAR"]["confidence_label"], "Độ tin cậy phát hiện khuôn mặt")
+        self.assertEqual(by_type["UNKNOWN_FACE"]["reason_code"], "")
+        self.assertEqual(by_type["UNKNOWN_FACE"]["note"], "plain text note")
+        self.assertEqual(by_type["UNKNOWN_FACE"]["confidence_label"], "Độ tin cậy khớp danh tính")
 
     def test_repeat_checkin_returns_already_checked_in_without_changing_status(self):
         student = self.add_student()

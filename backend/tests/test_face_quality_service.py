@@ -3,10 +3,12 @@ from PIL import Image, ImageFilter
 from services.face_quality_service import (
     FaceQualityReason,
     FaceQualityThresholds,
+    METRIC_DESCRIPTIONS,
     calculate_brightness,
     calculate_face_size_ratio,
     calculate_sharpness,
     estimate_yaw_from_landmarks,
+    load_face_quality_thresholds_from_env,
     map_failure_reason,
     validate_landmark_geometry,
 )
@@ -115,3 +117,32 @@ def test_reason_code_mapping_returns_none_when_quality_passes():
     )
 
     assert reason is None
+
+
+def test_load_face_quality_thresholds_from_env_allows_calibration_overrides(monkeypatch):
+    monkeypatch.setenv("FACE_QUALITY_MIN_SHARPNESS", "12.5")
+    monkeypatch.setenv("FACE_QUALITY_MIN_BRIGHTNESS", "50")
+    monkeypatch.setenv("FACE_QUALITY_MAX_BRIGHTNESS", "210")
+    monkeypatch.setenv("FACE_QUALITY_MIN_FACE_SIZE_RATIO", "0.12")
+    monkeypatch.setenv("FACE_QUALITY_MIN_DETECTION_PROBABILITY", "0.95")
+    monkeypatch.setenv("FACE_QUALITY_MAX_YAW_RATIO", "0.25")
+
+    thresholds = load_face_quality_thresholds_from_env()
+
+    assert thresholds == FaceQualityThresholds(
+        min_sharpness=12.5,
+        min_brightness=50,
+        max_brightness=210,
+        min_face_size_ratio=0.12,
+        min_detection_probability=0.95,
+        max_yaw_ratio=0.25,
+    )
+
+
+def test_metric_descriptions_include_calibration_fields():
+    assert "sharpness" in METRIC_DESCRIPTIONS
+    assert "brightness" in METRIC_DESCRIPTIONS
+    assert "face_size_ratio" in METRIC_DESCRIPTIONS
+    assert "detection_confidence" in METRIC_DESCRIPTIONS
+    assert "yaw_estimate" in METRIC_DESCRIPTIONS
+    assert "landmark_geometry" in METRIC_DESCRIPTIONS

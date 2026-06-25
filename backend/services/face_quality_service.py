@@ -1,9 +1,18 @@
 from dataclasses import dataclass
 from enum import Enum
+import os
 from typing import Optional, Sequence
 
 import numpy as np
 from PIL import Image, ImageFilter, ImageStat
+
+
+DEFAULT_MIN_SHARPNESS = 8.0
+DEFAULT_MIN_BRIGHTNESS = 45.0
+DEFAULT_MAX_BRIGHTNESS = 220.0
+DEFAULT_MIN_FACE_SIZE_RATIO = 0.08
+DEFAULT_MIN_DETECTION_PROBABILITY = 0.90
+DEFAULT_MAX_YAW_RATIO = 0.35
 
 
 class FaceQualityReason(str, Enum):
@@ -20,12 +29,19 @@ class FaceQualityReason(str, Enum):
 
 @dataclass(frozen=True)
 class FaceQualityThresholds:
-    min_sharpness: float = 8.0
-    min_brightness: float = 45.0
-    max_brightness: float = 220.0
-    min_face_size_ratio: float = 0.08
-    min_detection_probability: float = 0.90
-    max_yaw_ratio: float = 0.35
+    """Calibration knobs for the debug Face Quality Gate.
+
+    These defaults are starting points only. They should be calibrated with
+    real capture samples before this gate is used in production attendance.
+    Environment variables with the FACE_QUALITY_* prefix can override them.
+    """
+
+    min_sharpness: float = DEFAULT_MIN_SHARPNESS
+    min_brightness: float = DEFAULT_MIN_BRIGHTNESS
+    max_brightness: float = DEFAULT_MAX_BRIGHTNESS
+    min_face_size_ratio: float = DEFAULT_MIN_FACE_SIZE_RATIO
+    min_detection_probability: float = DEFAULT_MIN_DETECTION_PROBABILITY
+    max_yaw_ratio: float = DEFAULT_MAX_YAW_RATIO
 
 
 @dataclass(frozen=True)
@@ -37,6 +53,16 @@ class FaceQualityMetrics:
     landmark_geometry_valid: bool
 
 
+METRIC_DESCRIPTIONS = {
+    "sharpness": "Variance of edge intensity from a grayscale image. Lower values usually mean blur or weak detail.",
+    "brightness": "Mean grayscale pixel value from 0 to 255. Very low is dark; very high can be overexposed.",
+    "face_size_ratio": "Detected face bounding-box area divided by full image area.",
+    "detection_confidence": "MTCNN face detection probability for the selected face.",
+    "yaw_estimate": "Approximate horizontal pose from nose offset relative to eye center and eye distance.",
+    "landmark_geometry": "Neutral sanity checks for five MTCNN landmarks: eye, nose, and mouth ordering/spacing.",
+}
+
+
 @dataclass(frozen=True)
 class FaceQualityResult:
     passed: bool
@@ -45,7 +71,57 @@ class FaceQualityResult:
     metrics: FaceQualityMetrics
 
 
+def _parse_float_env(name: str, default: float, minimum: Optional[float] = None, maximum: Optional[float] = None) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+
+    if not np.isfinite(value):
+        value = default
+    if minimum is not None:
+        value = max(value, minimum)
+    if maximum is not None:
+        value = min(value, maximum)
+    return value
+
+
+def load_face_quality_thresholds_from_env() -> FaceQualityThresholds:
+    return FaceQualityThresholds(
+        min_sharpness=_parse_float_env("FACE_QUALITY_MIN_SHARPNESS", DEFAULT_MIN_SHARPNESS, minimum=0.0),
+        min_brightness=_parse_float_env(
+            "FACE_QUALITY_MIN_BRIGHTNESS",
+            DEFAULT_MIN_BRIGHTNESS,
+            minimum=0.0,
+            maximum=255.0,
+        ),
+        max_brightness=_parse_float_env(
+            "FACE_QUALITY_MAX_BRIGHTNESS",
+            DEFAULT_MAX_BRIGHTNESS,
+            minimum=0.0,
+            maximum=255.0,
+        ),
+        min_face_size_ratio=_parse_float_env(
+            "FACE_QUALITY_MIN_FACE_SIZE_RATIO",
+            DEFAULT_MIN_FACE_SIZE_RATIO,
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        min_detection_probability=_parse_float_env(
+            "FACE_QUALITY_MIN_DETECTION_PROBABILITY",
+            DEFAULT_MIN_DETECTION_PROBABILITY,
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        max_yaw_ratio=_parse_float_env("FACE_QUALITY_MAX_YAW_RATIO", DEFAULT_MAX_YAW_RATIO, minimum=0.0),
+    )
+
+
+DEFAULT_FACE_QUALITY_THRESHOLDS = FaceQualityThresholds()
+
+
 def calculate_sharpness(image: Image.Image) -> float:
+    """Return edge-variance sharpness; low values are useful for blur calibration."""
     grayscale = image.convert("L")
     edges = grayscale.filter(ImageFilter.FIND_EDGES)
     values = np.asarray(edges, dtype=np.float32)
@@ -53,11 +129,13 @@ def calculate_sharpness(image: Image.Image) -> float:
 
 
 def calculate_brightness(image: Image.Image) -> float:
+    """Return mean grayscale brightness on the 0-255 pixel scale."""
     grayscale = image.convert("L")
     return round(float(ImageStat.Stat(grayscale).mean[0]), 4)
 
 
 def calculate_face_size_ratio(bbox: Sequence[float], image_size: tuple[int, int]) -> float:
+    """Return detected face area divided by image area."""
     image_width, image_height = image_size
     if image_width <= 0 or image_height <= 0:
         return 0.0
@@ -80,6 +158,7 @@ def normalize_landmarks(landmarks: Optional[Sequence[Sequence[float]]]) -> Optio
 
 
 def estimate_yaw_from_landmarks(landmarks: Optional[Sequence[Sequence[float]]]) -> Optional[float]:
+    """Estimate horizontal pose from five landmarks; this is only a calibration heuristic."""
     points = normalize_landmarks(landmarks)
     if points is None:
         return None
@@ -94,6 +173,7 @@ def estimate_yaw_from_landmarks(landmarks: Optional[Sequence[Sequence[float]]]) 
 
 
 def validate_landmark_geometry(landmarks: Optional[Sequence[Sequence[float]]]) -> bool:
+    """Validate neutral five-point landmark ordering and spacing without inferring identity or mask use."""
     points = normalize_landmarks(landmarks)
     if points is None:
         return False
@@ -132,7 +212,7 @@ def map_failure_reason(
     landmarks_present: bool,
     landmark_geometry_valid: bool,
     yaw_estimate: Optional[float],
-    thresholds: FaceQualityThresholds = FaceQualityThresholds(),
+    thresholds: FaceQualityThresholds = DEFAULT_FACE_QUALITY_THRESHOLDS,
 ) -> Optional[str]:
     if detection_probability is None or detection_probability < thresholds.min_detection_probability:
         return FaceQualityReason.LOW_DETECTION_CONFIDENCE.value
@@ -158,7 +238,7 @@ def evaluate_face_quality(
     bbox: Sequence[float],
     detection_probability: Optional[float],
     landmarks: Optional[Sequence[Sequence[float]]],
-    thresholds: FaceQualityThresholds = FaceQualityThresholds(),
+    thresholds: FaceQualityThresholds = DEFAULT_FACE_QUALITY_THRESHOLDS,
 ) -> FaceQualityResult:
     sharpness = calculate_sharpness(image)
     brightness = calculate_brightness(image)

@@ -450,6 +450,8 @@ export default function Sessions() {
   const [alertLoading,      setAlertLoading]      = useState(false)
   const [alertMessage,      setAlertMessage]      = useState('')
   const [alertFilter,       setAlertFilter]       = useState('active')
+  const [exportingSessionId, setExportingSessionId] = useState(null)
+  const [exportType,         setExportType]         = useState(null)
 
   const loadAlertCounts = async (sessionsList) => {
     const counts = {}
@@ -782,6 +784,55 @@ export default function Sessions() {
       setAlertLoading(false)
     }
   }
+
+  const handleExportCSV = async (sessionId, type) => {
+    setExportingSessionId(sessionId)
+    setExportType(type)
+    try {
+      const endpoint = type === 'attendance'
+        ? `/reports/export/csv/session/${sessionId}`
+        : `/reports/export/csv/session/${sessionId}/alerts`
+      
+      const response = await api.get(endpoint, {
+        responseType: 'blob'
+      })
+      
+      let filename = type === 'attendance'
+        ? `attendance_session_${sessionId}.csv`
+        : `security_alerts_session_${sessionId}.csv`
+        
+      const contentDisposition = response.headers['content-disposition'] || response.headers['Content-Disposition']
+      if (contentDisposition) {
+        const filenameStarMatch = contentDisposition.match(/filename\*=utf-8''([^;\n]+)/i)
+        if (filenameStarMatch && filenameStarMatch[1]) {
+          filename = decodeURIComponent(filenameStarMatch[1])
+        } else {
+          const filenameMatch = contentDisposition.match(/filename=["']?([^"';\n]+)["']?/i)
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1].replace(/['"]/g, '')
+          }
+        }
+      }
+      
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', filename)
+      document.body.appendChild(link)
+      link.click()
+      link.removeAttribute('download')
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Export CSV error:', error)
+      window.alert('Không thể xuất báo cáo. Vui lòng thử lại.')
+    } finally {
+      setExportingSessionId(null)
+      setExportType(null)
+    }
+  }
+
   const getWeeksStr = (session) => {
     if (!session.section_id) return '-'
     const group = sessions.filter(s => s.section_id === session.section_id)
@@ -1191,17 +1242,35 @@ export default function Sessions() {
                               </span>
                             )}
                           </button>
-                          <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
-                            Sửa
-                          </button>
-                          <button
-                            className="secondary"
-                            style={{ background: 'rgba(244,63,94,.1)', border: '1px solid rgba(244,63,94,.25)', color: 'var(--red)' }}
-                            onClick={() => handleDelete(session)}
-                            disabled={loading}
-                          >
-                            Xóa
-                          </button>
+                            <button
+                              className="secondary"
+                              onClick={() => handleExportCSV(session.id, 'attendance')}
+                              disabled={exportingSessionId === session.id}
+                              title="Xuất điểm danh CSV"
+                              style={{ minWidth: 'auto', padding: '0 8px' }}
+                            >
+                              {exportingSessionId === session.id && exportType === 'attendance' ? '...' : '📥 Điểm danh'}
+                            </button>
+                            <button
+                              className="secondary"
+                              onClick={() => handleExportCSV(session.id, 'alerts')}
+                              disabled={exportingSessionId === session.id}
+                              title="Xuất cảnh báo CSV"
+                              style={{ minWidth: 'auto', padding: '0 8px' }}
+                            >
+                              {exportingSessionId === session.id && exportType === 'alerts' ? '...' : '📥 Cảnh báo'}
+                            </button>
+                            <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
+                              Sửa
+                            </button>
+                            <button
+                              className="secondary"
+                              style={{ background: 'rgba(244,63,94,.1)', border: '1px solid rgba(244,63,94,.25)', color: 'var(--red)' }}
+                              onClick={() => handleDelete(session)}
+                              disabled={loading}
+                            >
+                              Xóa
+                            </button>
                         </div>
                       </td>
                     </tr>
@@ -1259,6 +1328,25 @@ export default function Sessions() {
                       <span className="mobile-card-value" style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em' }}>
                         {session.week_pattern || session.week_display || getWeeksStr(session)}
                       </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8, marginBottom: 4, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px dashed var(--bdr)', paddingTop: 8, paddingLeft: 12, paddingRight: 12 }}>
+                      <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Xuất báo cáo:</span>
+                      <button
+                        className="secondary"
+                        style={{ fontSize: 11, minHeight: 28, padding: '0 8px', borderRadius: 4 }}
+                        onClick={() => handleExportCSV(session.id, 'attendance')}
+                        disabled={exportingSessionId === session.id}
+                      >
+                        {exportingSessionId === session.id && exportType === 'attendance' ? 'Đang xuất...' : '📥 Điểm danh CSV'}
+                      </button>
+                      <button
+                        className="secondary"
+                        style={{ fontSize: 11, minHeight: 28, padding: '0 8px', borderRadius: 4 }}
+                        onClick={() => handleExportCSV(session.id, 'alerts')}
+                        disabled={exportingSessionId === session.id}
+                      >
+                        {exportingSessionId === session.id && exportType === 'alerts' ? 'Đang xuất...' : '📥 Cảnh báo CSV'}
+                      </button>
                     </div>
                     <div className="mobile-card-actions">
                       <button
@@ -1417,7 +1505,26 @@ export default function Sessions() {
                         <div>📍 Phòng học: {s.room_name || '-'}</div>
                         {s.note && <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>📝 Ghi chú: {s.note}</div>}
                         <div style={{ fontFamily: 'var(--mono)', letterSpacing: '0.12em', fontSize: '12px', marginTop: 4 }}>
-                          Tuần học: {s.week_pattern || s.week_display || getWeeksStr(s)}
+                        Tuần học: {s.week_pattern || s.week_display || getWeeksStr(s)}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px dashed var(--bdr)', paddingTop: 8 }}>
+                          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Xuất báo cáo:</span>
+                          <button
+                            className="secondary"
+                            style={{ fontSize: 11, minHeight: 28, padding: '0 8px', borderRadius: 4 }}
+                            onClick={() => handleExportCSV(s.id, 'attendance')}
+                            disabled={exportingSessionId === s.id}
+                          >
+                            {exportingSessionId === s.id && exportType === 'attendance' ? 'Đang xuất...' : '📥 Điểm danh CSV'}
+                          </button>
+                          <button
+                            className="secondary"
+                            style={{ fontSize: 11, minHeight: 28, padding: '0 8px', borderRadius: 4 }}
+                            onClick={() => handleExportCSV(s.id, 'alerts')}
+                            disabled={exportingSessionId === s.id}
+                          >
+                            {exportingSessionId === s.id && exportType === 'alerts' ? 'Đang xuất...' : '📥 Cảnh báo CSV'}
+                          </button>
                         </div>
                       </div>
 

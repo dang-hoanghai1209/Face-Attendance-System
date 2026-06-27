@@ -18,7 +18,7 @@ from database import get_db
 from models.attendance import Attendance
 from models.security_alert import SecurityAlert
 from models.student import Student
-from services.auth_service import get_current_user, require_admin
+from services.auth_service import get_current_user, require_admin, require_role
 from services import report_service
 
 
@@ -144,6 +144,12 @@ SECURITY_ALERT_CSV_COLUMNS = [
 ]
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+require_report_exporter = require_role("admin", "teacher")
+
+
+def _ensure_report_exporter(user):
+    if getattr(user, "role", None) not in {"admin", "teacher"}:
+        raise HTTPException(status_code=403, detail="Bạn không có quyền xuất báo cáo CSV.")
 
 
 def _safe_filename(value: str):
@@ -718,7 +724,8 @@ def export_warning_excel(class_name: str, current_user=Depends(get_current_user)
 
 
 @router.get("/export/csv/session/{session_id}")
-def export_session_csv(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+def export_session_csv(session_id: int, current_user=Depends(require_report_exporter), db: Session = Depends(get_db)):
+    _ensure_report_exporter(current_user)
     session, rows = report_service.build_session_report_for_user(session_id, db, current_user)
     csv_rows = _attendance_csv_rows(session, rows, db)
     filename = _safe_filename(
@@ -728,7 +735,8 @@ def export_session_csv(session_id: int, current_user=Depends(get_current_user), 
 
 
 @router.get("/export/csv/session/{session_id}/alerts")
-def export_session_alerts_csv(session_id: int, current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+def export_session_alerts_csv(session_id: int, current_user=Depends(require_report_exporter), db: Session = Depends(get_db)):
+    _ensure_report_exporter(current_user)
     session, _rows = report_service.build_session_report_for_user(session_id, db, current_user)
     csv_rows = _security_alert_csv_rows(session_id, db)
     filename = _safe_filename(

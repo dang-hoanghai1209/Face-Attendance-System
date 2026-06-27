@@ -107,6 +107,35 @@ async function mockApi(page, options = {}) {
       })
     }
 
+    if (path === '/subjects/') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{ id: 1, subject_code: 'TEST101', subject_name: 'Testing' }]),
+      })
+    }
+
+    if (path.match(/^\/alerts\/session\/\d+\/count$/)) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ total_active: 0 }),
+      })
+    }
+
+    if (path === '/reports/export/csv/session/1') {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/csv; charset=utf-8',
+        headers: {
+          'Access-Control-Expose-Headers': 'Content-Disposition',
+          'Content-Disposition': 'attachment; filename=attendance_session_1_TEST101.csv',
+        },
+        body: '\uFEFFsession_id,class_name,student_code,full_name,attendance_status\n1,64CNTT,64100001,Student User,present\n',
+      })
+    }
+
     if (path === '/sessions/' || path === '/students/me/active-sessions') {
       return route.fulfill({
         status: 200,
@@ -197,6 +226,24 @@ test('teacher does not see admin menus and is blocked from admin routes', async 
   await expect(page).toHaveURL('/')
   await page.goto('/audit-logs')
   await expect(page).toHaveURL('/')
+})
+
+test('teacher can export session attendance CSV once with backend filename', async ({ page }) => {
+  const seen = await loginAs(page, 'teacher')
+
+  await page.goto('/sessions')
+  await page.locator('.sessions-view-toggle button').nth(1).click()
+  const exportButton = page.locator('button[title*="CSV"]').first()
+  await expect(exportButton).toBeVisible()
+
+  const downloadPromise = page.waitForEvent('download')
+  await exportButton.click()
+  await expect(exportButton).toBeDisabled()
+  await exportButton.click({ trial: true }).catch(() => {})
+  const download = await downloadPromise
+
+  expect(download.suggestedFilename()).toBe('attendance_session_1_TEST101.csv')
+  expect(seen.filter((item) => item.path === '/reports/export/csv/session/1')).toHaveLength(1)
 })
 
 test('student only sees student-appropriate menus and is blocked from admin routes', async ({ page }) => {

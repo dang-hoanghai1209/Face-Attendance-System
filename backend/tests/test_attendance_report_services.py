@@ -10,6 +10,8 @@ from datetime import date, datetime, time
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("APP_TIMEZONE", "Asia/Nha_Trang")
 
+from fastapi import HTTPException
+
 from database import Base, SessionLocal, engine
 from models.attendance import Attendance
 from models.attendance_scan import AttendanceScan
@@ -295,6 +297,66 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(by_type["UNKNOWN_FACE"]["reason_code"], "")
         self.assertEqual(by_type["UNKNOWN_FACE"]["note"], "plain text note")
         self.assertEqual(by_type["UNKNOWN_FACE"]["confidence_label"], "Độ tin cậy khớp danh tính")
+
+    def test_export_session_csv_rejects_student_role(self):
+        student = self.add_student()
+        session = self.add_session()
+        self.add_session_enrollments(session, [student])
+
+        user = type("User", (), {"role": "student", "username": student.student_code})()
+
+        with self.assertRaises(HTTPException) as context:
+            reports.export_session_csv(session.id, current_user=user, db=self.db)
+
+        self.assertEqual(context.exception.status_code, 403)
+
+    def test_export_session_alerts_csv_rejects_student_role(self):
+        student = self.add_student()
+        session = self.add_session()
+        self.add_session_enrollments(session, [student])
+        self.db.add(SecurityAlert(session_id=session.id, alert_type="UNKNOWN_FACE", note="private alert"))
+        self.db.commit()
+
+        user = type("User", (), {"role": "student", "username": student.student_code})()
+
+        with self.assertRaises(HTTPException) as context:
+            reports.export_session_alerts_csv(session.id, current_user=user, db=self.db)
+
+        self.assertEqual(context.exception.status_code, 403)
+
+    def test_export_session_csv_rejects_teacher_without_session_scope(self):
+        student = self.add_student()
+        session = self.add_session()
+        self.add_session_enrollments(session, [student])
+
+        user = type("User", (), {"role": "teacher", "username": "other_teacher", "full_name": "Other Teacher"})()
+
+        with self.assertRaises(HTTPException) as context:
+            reports.export_session_csv(session.id, current_user=user, db=self.db)
+
+        self.assertEqual(context.exception.status_code, 403)
+
+    def test_export_session_csv_returns_header_for_empty_session(self):
+        session = self.add_session()
+        user = type("User", (), {"role": "admin"})()
+
+        response = reports.export_session_csv(session.id, current_user=user, db=self.db)
+        body = self.collect_streaming_response(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(body.startswith(b"\xef\xbb\xbf"))
+        rows = body.decode("utf-8-sig").splitlines()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("session_id,class_name,student_code,full_name,attendance_status", rows[0])
+        self.assertIn("filename=attendance_session_", response.headers["content-disposition"])
+
+    def test_export_session_csv_returns_404_for_missing_session(self):
+        user = type("User", (), {"role": "admin"})()
+
+        with self.assertRaises(HTTPException) as context:
+            reports.export_session_csv(999999, current_user=user, db=self.db)
+
+        self.assertEqual(context.exception.status_code, 404)
 
     def test_repeat_checkin_returns_already_checked_in_without_changing_status(self):
         student = self.add_student()

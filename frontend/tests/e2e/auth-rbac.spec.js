@@ -132,7 +132,7 @@ async function mockApi(page, options = {}) {
             id: 7,
             session_id: 1,
             alert_type: 'UNKNOWN_FACE',
-            captured_img: 'media/alerts/1/private.jpg',
+            has_captured_img: true,
             confidence: 0.42,
             dismissed: false,
             created_at: '2026-06-24T08:00:00',

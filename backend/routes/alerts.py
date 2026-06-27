@@ -46,7 +46,7 @@ def _serialize_alert(db: Session, alert: SecurityAlert):
         "student_code": student.student_code if student else None,
         "full_name": student.full_name if student else None,
         "class_name": student.class_name if student else None,
-        "captured_img": alert.captured_img,
+        "has_captured_img": bool(alert.captured_img),
         "confidence": alert.confidence,
         "liveness_score": alert.liveness_score,
         "gps_lat": alert.gps_lat,

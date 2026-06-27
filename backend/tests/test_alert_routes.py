@@ -98,6 +98,8 @@ class AlertRouteTests(unittest.TestCase):
         self.assertEqual(response[0]["liveness_score"], 0.22)
         self.assertEqual(response[0]["gps_lat"], 12.238912)
         self.assertEqual(response[0]["gps_lng"], 109.196748)
+        self.assertTrue(response[0]["has_captured_img"])
+        self.assertNotIn("captured_img", response[0])
         self.assertFalse(response[0]["dismissed"])
 
     def test_list_active_alerts_returns_only_not_dismissed(self):
@@ -125,6 +127,8 @@ class AlertRouteTests(unittest.TestCase):
         self.assertEqual(response["dismissed_by"], "lecturer")
         self.assertEqual(response["note"], "Đã kiểm tra")
         self.assertIsNotNone(response["dismissed_at"])
+        self.assertTrue(response["has_captured_img"])
+        self.assertNotIn("captured_img", response)
 
         with self.assertRaises(HTTPException) as ctx:
             dismiss_alert(999, AlertDismissRequest(), current_user=None, db=self.db)

@@ -131,7 +131,7 @@ def _security_alert_response(status: str, message: str, alert):
         "student_id": alert.student_id,
         "confidence": alert.confidence,
         "liveness_score": alert.liveness_score,
-        "captured_img": alert.captured_img,
+        "has_captured_img": bool(alert.captured_img),
     }
 
 

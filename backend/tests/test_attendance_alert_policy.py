@@ -101,6 +101,8 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
 
         alerts = self.alerts("SPOOF")
         self.assertEqual(response["status"], "spoof")
+        self.assertTrue(response["has_captured_img"])
+        self.assertNotIn("captured_img", response)
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].captured_img, "media/captures/spoof.jpg")
         self.assertEqual(alerts[0].liveness_score, 0.12)
@@ -122,6 +124,8 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
 
         alerts = self.alerts("UNKNOWN_FACE")
         self.assertEqual(response["status"], "unknown")
+        self.assertTrue(response["has_captured_img"])
+        self.assertNotIn("captured_img", response)
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].confidence, 0.2)
         self.assertEqual(alerts[0].captured_img, "media/captures/unknown.jpg")

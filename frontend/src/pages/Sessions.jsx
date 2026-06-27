@@ -184,9 +184,9 @@ const renderConfidence = (alert) => {
   )
 }
 
-const AlertImage = ({ alertId, path }) => {
+const AlertImage = ({ alertId, hasImage }) => {
   const [imageUrl, setImageUrl] = useState(null)
-  const [loading, setLoading] = useState(Boolean(alertId && path))
+  const [loading, setLoading] = useState(Boolean(alertId && hasImage))
   const [hasError, setHasError] = useState(false)
 
   useEffect(() => {
@@ -196,7 +196,7 @@ const AlertImage = ({ alertId, path }) => {
     setImageUrl(null)
     setHasError(false)
 
-    if (!alertId || !path) {
+    if (!alertId || !hasImage) {
       setLoading(false)
       return () => {}
     }
@@ -219,7 +219,7 @@ const AlertImage = ({ alertId, path }) => {
       active = false
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [alertId, path])
+  }, [alertId, hasImage])
   
   if (loading) {
     return (
@@ -1979,7 +1979,7 @@ export default function Sessions() {
                         }}
                       >
                         {/* Image or fallback */}
-                        <AlertImage alertId={al.id} path={al.captured_img} />
+                        <AlertImage alertId={al.id} hasImage={al.has_captured_img} />
 
                         {/* Details */}
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>

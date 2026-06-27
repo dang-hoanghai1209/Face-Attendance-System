@@ -25,6 +25,8 @@ frontend/playwright-report/
 .env.*
 backend/.env.*
 frontend/.env.*
+backend/.env*
+frontend/.env*
 backend/.env
 frontend/.env
 !.env.example
@@ -49,6 +51,7 @@ backend/data/*.pkl
 backend/enrollment_data/
 backend/evaluation_data/
 backend/media/
+backend/private_media/
 backend/uploads/
 
 # Local DB
@@ -57,6 +60,8 @@ backend/uploads/
 *.sqlite3
 
 # Cache/temp
+__pycache__/
+.pytest_cache/
 .cache/
 tmp/
 temp/
@@ -64,6 +69,9 @@ temp/
 # Docker / test artifacts
 *.pid
 coverage/
+node_modules/
+playwright-report/
+test-results/
 
 # Local private notes
 local_notes/

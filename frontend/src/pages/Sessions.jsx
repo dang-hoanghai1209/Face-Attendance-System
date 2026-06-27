@@ -184,8 +184,9 @@ const renderConfidence = (alert) => {
   )
 }
 
-const AlertImage = ({ alertId, hasImage }) => {
+const AlertImage = ({ alertId, hasImage, onPreview }) => {
   const [imageUrl, setImageUrl] = useState(null)
+  const [imageBlob, setImageBlob] = useState(null)
   const [loading, setLoading] = useState(Boolean(alertId && hasImage))
   const [hasError, setHasError] = useState(false)
 
@@ -194,6 +195,7 @@ const AlertImage = ({ alertId, hasImage }) => {
     let objectUrl = null
 
     setImageUrl(null)
+    setImageBlob(null)
     setHasError(false)
 
     if (!alertId || !hasImage) {
@@ -206,6 +208,7 @@ const AlertImage = ({ alertId, hasImage }) => {
       .then((response) => {
         if (!active) return
         objectUrl = URL.createObjectURL(response.data)
+        setImageBlob(response.data)
         setImageUrl(objectUrl)
       })
       .catch(() => {
@@ -220,6 +223,29 @@ const AlertImage = ({ alertId, hasImage }) => {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [alertId, hasImage])
+
+  if (!hasImage) {
+    return (
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 6,
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          color: 'var(--muted)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 10,
+          textAlign: 'center',
+          padding: 4
+        }}
+      >
+        Khong co anh
+      </div>
+    )
+  }
   
   if (loading) {
     return (
@@ -268,20 +294,37 @@ const AlertImage = ({ alertId, hasImage }) => {
   }
   
   return (
-    <img
-      src={imageUrl}
-      alt="Captured alert"
+    <button
+      type="button"
+      aria-label={`Xem anh canh bao ${alertId}`}
+      onClick={() => {
+        if (imageBlob && onPreview) onPreview(imageBlob, alertId)
+      }}
       style={{
         width: 72,
         height: 72,
+        padding: 0,
+        minHeight: 72,
         borderRadius: 6,
-        objectFit: 'cover',
         border: '1px solid rgba(255,255,255,0.1)',
-        cursor: 'pointer'
+        cursor: 'pointer',
+        background: 'transparent',
+        overflow: 'hidden'
       }}
-      onClick={() => window.open(imageUrl, '_blank', 'noopener,noreferrer')}
-      onError={() => setHasError(true)}
-    />
+    >
+      <img
+        src={imageUrl}
+        alt="Captured alert"
+        style={{
+          width: '100%',
+          height: '100%',
+          borderRadius: 6,
+          objectFit: 'cover',
+          display: 'block'
+        }}
+        onError={() => setHasError(true)}
+      />
+    </button>
   )
 }
 
@@ -497,8 +540,39 @@ export default function Sessions() {
   const [alertLoading,      setAlertLoading]      = useState(false)
   const [alertMessage,      setAlertMessage]      = useState('')
   const [alertFilter,       setAlertFilter]       = useState('active')
+  const [alertImagePreview, setAlertImagePreview] = useState(null)
+  const alertImagePreviewUrlRef = useRef(null)
   const [exportingSessionId, setExportingSessionId] = useState(null)
   const [exportType,         setExportType]         = useState(null)
+
+  const closeAlertImagePreview = () => {
+    if (alertImagePreviewUrlRef.current) {
+      URL.revokeObjectURL(alertImagePreviewUrlRef.current)
+      alertImagePreviewUrlRef.current = null
+    }
+    setAlertImagePreview(null)
+  }
+
+  const openAlertImagePreview = (blob, alertId) => {
+    if (alertImagePreviewUrlRef.current) {
+      URL.revokeObjectURL(alertImagePreviewUrlRef.current)
+    }
+    const url = URL.createObjectURL(blob)
+    alertImagePreviewUrlRef.current = url
+    setAlertImagePreview({ alertId, url })
+  }
+
+  useEffect(() => () => {
+    if (alertImagePreviewUrlRef.current) {
+      URL.revokeObjectURL(alertImagePreviewUrlRef.current)
+      alertImagePreviewUrlRef.current = null
+    }
+  }, [])
+
+  const closeAlertModal = () => {
+    closeAlertImagePreview()
+    setAlertModalTarget(null)
+  }
 
   const loadAlertCounts = async (sessionsList) => {
     const counts = {}
@@ -1879,7 +1953,7 @@ export default function Sessions() {
               </div>
               <button
                 className="secondary"
-                onClick={() => setAlertModalTarget(null)}
+                onClick={closeAlertModal}
                 style={{ minHeight: 32, padding: '0 8px', fontSize: 18 }}
               >
                 ✕
@@ -1979,7 +2053,7 @@ export default function Sessions() {
                         }}
                       >
                         {/* Image or fallback */}
-                        <AlertImage alertId={al.id} hasImage={al.has_captured_img} />
+                        <AlertImage alertId={al.id} hasImage={al.has_captured_img} onPreview={openAlertImagePreview} />
 
                         {/* Details */}
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -2082,12 +2156,74 @@ export default function Sessions() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--bdr)', paddingTop: 10 }}>
               <button
                 className="secondary"
-                onClick={() => setAlertModalTarget(null)}
+                onClick={closeAlertModal}
                 style={{ minHeight: 38 }}
               >
                 Đóng
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {alertImagePreview && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Anh canh bao ${alertImagePreview.alertId}`}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.78)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100,
+            padding: 16
+          }}
+          onClick={closeAlertImagePreview}
+        >
+          <div
+            style={{
+              width: 'min(900px, 100%)',
+              maxHeight: '92vh',
+              background: 'var(--navy2)',
+              border: '1px solid var(--bdr2)',
+              borderRadius: 10,
+              padding: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: 'var(--shadow)'
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <h3 style={{ margin: 0, fontSize: 15, color: 'var(--white)' }}>
+                Anh canh bao #{alertImagePreview.alertId}
+              </h3>
+              <button
+                type="button"
+                className="secondary"
+                onClick={closeAlertImagePreview}
+                style={{ minHeight: 32, padding: '0 10px', fontSize: 16 }}
+              >
+                x
+              </button>
+            </div>
+            <img
+              src={alertImagePreview.url}
+              alt={`Alert capture ${alertImagePreview.alertId}`}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '78vh',
+                objectFit: 'contain',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(0,0,0,0.25)'
+              }}
+              onError={closeAlertImagePreview}
+            />
           </div>
         </div>
       )}

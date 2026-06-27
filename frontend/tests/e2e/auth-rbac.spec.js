@@ -275,17 +275,30 @@ test('teacher can export session attendance CSV once with backend filename', asy
   expect(seen.filter((item) => item.path === '/reports/export/csv/session/1')).toHaveLength(1)
 })
 
-test('teacher alert image loads through authenticated private media endpoint', async ({ page }) => {
+test('teacher alert image opens in-app preview through authenticated private media endpoint', async ({ page }) => {
   const seen = await loginAs(page, 'teacher')
+  let popupOpened = false
+  page.on('popup', () => {
+    popupOpened = true
+  })
 
   await page.goto('/sessions')
   await page.locator('.sessions-view-toggle button').nth(1).click()
   await page.getByRole('button', { name: /Cảnh báo|Cáº£nh bÃ¡o/i }).first().click()
 
+  const thumbnail = page.getByRole('button', { name: /Xem anh canh bao 7/i })
+  await expect(thumbnail).toBeVisible()
+  await thumbnail.click()
+
+  const preview = page.getByRole('dialog', { name: /Anh canh bao 7/i })
+  await expect(preview).toBeVisible()
+  await expect(preview.getByRole('img', { name: /Alert capture 7/i })).toBeVisible()
+  expect(popupOpened).toBeFalsy()
+
   await expect.poll(() => (
     seen.some((item) => item.path === '/media-private/alerts/7/image' && item.auth === `Bearer ${tokenFor('teacher')}`)
   )).toBeTruthy()
-  expect(seen.some((item) => item.path.startsWith('/media/'))).toBeFalsy()
+  expect(seen.some((item) => item.path.startsWith('/media/alerts'))).toBeFalsy()
 })
 
 test('student only sees student-appropriate menus and is blocked from admin routes', async ({ page }) => {

@@ -41,7 +41,7 @@ from models.security_alert import SecurityAlert  # noqa: F401
 from models.student import Student
 from models.subject import Subject  # noqa: F401
 from models.user import User  # noqa: F401
-from routes import alerts, attendance, auth, classrooms, course_sections, enrollments, faces, reports, sessions, students, subjects
+from routes import alerts, attendance, auth, classrooms, course_sections, enrollments, faces, media_private, reports, sessions, students, subjects
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
 from services.attendance_service import OFFICIAL_ATTENDANCE_BLOCK_MESSAGE
@@ -766,6 +766,7 @@ app.include_router(attendance.router)
 app.include_router(sessions.router)
 app.include_router(reports.router)
 app.include_router(faces.router)
+app.include_router(media_private.router)
 
 
 if __name__ == "__main__":

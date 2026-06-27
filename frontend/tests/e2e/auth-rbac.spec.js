@@ -301,6 +301,41 @@ test('teacher alert image opens in-app preview through authenticated private med
   expect(seen.some((item) => item.path.startsWith('/media/alerts'))).toBeFalsy()
 })
 
+test('teacher can fill session GPS from current location and sees poor accuracy warning', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'geolocation', {
+      configurable: true,
+      value: {
+      watchPosition(success) {
+        ;[172, 170, 169, 168, 171].forEach((accuracy, index) => {
+          setTimeout(() => {
+            success({ coords: { latitude: 12.238912, longitude: 109.196748, accuracy } })
+          }, index)
+        })
+        return 1
+      },
+      clearWatch() {},
+      },
+    })
+  })
+  await loginAs(page, 'teacher')
+
+  await page.goto('/sessions')
+  await page.getByRole('button', { name: /Chi/i }).first().click()
+  await page.getByRole('button', { name: /Sửa|Sá»­a/i }).first().click()
+
+  await page.getByRole('button', { name: 'Lấy vị trí hiện tại' }).click()
+  await expect(page.getByRole('dialog', { name: 'Cho phép lấy vị trí hiện tại?' })).toBeVisible()
+  await page.getByRole('button', { name: 'Cho phép' }).click()
+
+  await expect(page.getByText('GPS hiện tại chưa đủ chính xác.')).toBeVisible()
+  await page.getByRole('button', { name: 'Dùng tọa độ này' }).click()
+
+  await expect(page.getByLabel('Latitude')).toHaveValue('12.238912')
+  await expect(page.getByLabel('Longitude')).toHaveValue('109.196748')
+  await expect(page.getByText('Accuracy hiện tại lớn hơn bán kính cho phép.')).toBeVisible()
+})
+
 test('student only sees student-appropriate menus and is blocked from admin routes', async ({ page }) => {
   await loginAs(page, 'student')
 

@@ -73,6 +73,21 @@ const getSessionCodeValue = (session) => (
   ''
 )
 
+const GEO_SAMPLE_TARGET = 5
+const GEO_SAMPLE_WINDOW_MS = 10000
+const GEO_TIMEOUT_MS = 15000
+
+const getAccuracyStatus = (accuracy) => {
+  if (accuracy === null || accuracy === undefined) return { label: '-', color: 'var(--muted)' }
+  if (accuracy <= 30) return { label: 'Tốt', color: 'var(--teal)' }
+  if (accuracy <= 80) return { label: 'Trung bình', color: '#f59e0b' }
+  return { label: 'Kém', color: '#fb7185' }
+}
+
+const formatCoordinate = (value) => (
+  Number.isFinite(value) ? value.toFixed(6) : ''
+)
+
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
 // ------------------------------------------------------------------ //
@@ -413,6 +428,13 @@ export default function Sessions() {
   const [editModalErrors, setEditModalErrors] = useState(emptyErrors)
   const [editModalMessage, setEditModalMessage] = useState('')
   const [editModalSaving, setEditModalSaving] = useState(false)
+  const [geoModalOpen, setGeoModalOpen] = useState(false)
+  const [geoSampling, setGeoSampling] = useState(false)
+  const [geoResult, setGeoResult] = useState(null)
+  const [geoError, setGeoError] = useState('')
+  const [geoAppliedAccuracy, setGeoAppliedAccuracy] = useState(null)
+  const geoWatchRef = useRef(null)
+  const geoTimerRef = useRef(null)
 
   // State variables for course section grouping
   const [viewMode, setViewMode] = useState('grouped')
@@ -668,6 +690,118 @@ export default function Sessions() {
     setEditModalMessage('')
   }
 
+  const clearGeoSampling = () => {
+    if (geoWatchRef.current !== null && navigator.geolocation?.clearWatch) {
+      navigator.geolocation.clearWatch(geoWatchRef.current)
+      geoWatchRef.current = null
+    }
+    if (geoTimerRef.current) {
+      clearTimeout(geoTimerRef.current)
+      geoTimerRef.current = null
+    }
+  }
+
+  const openGeoModal = () => {
+    clearGeoSampling()
+    setGeoModalOpen(true)
+    setGeoSampling(false)
+    setGeoResult(null)
+    setGeoError('')
+    setGeoAppliedAccuracy(null)
+  }
+
+  const closeGeoModal = () => {
+    clearGeoSampling()
+    setGeoModalOpen(false)
+    setGeoSampling(false)
+    setGeoResult(null)
+    setGeoError('')
+  }
+
+  const startGeoSampling = () => {
+    clearGeoSampling()
+    setGeoSampling(true)
+    setGeoResult(null)
+    setGeoError('')
+
+    if (!navigator.geolocation) {
+      setGeoSampling(false)
+      setGeoError('Trình duyệt không hỗ trợ lấy vị trí.')
+      return
+    }
+
+    let bestSample = null
+    let sampleCount = 0
+    let finished = false
+
+    const finish = (message = '') => {
+      if (finished) return
+      finished = true
+      clearGeoSampling()
+      setGeoSampling(false)
+      if (bestSample) {
+        setGeoResult(bestSample)
+      } else {
+        setGeoError(message || 'Không lấy được vị trí hiện tại. Vui lòng thử lại.')
+      }
+    }
+
+    const handlePosition = (position) => {
+      const { latitude, longitude, accuracy } = position.coords
+      const sample = {
+        latitude,
+        longitude,
+        accuracy: Number.isFinite(accuracy) ? accuracy : null,
+        collectedAt: Date.now(),
+      }
+      sampleCount += 1
+      if (
+        !bestSample ||
+        bestSample.accuracy === null ||
+        (sample.accuracy !== null && sample.accuracy < bestSample.accuracy)
+      ) {
+        bestSample = sample
+        setGeoResult(sample)
+      }
+      if (sampleCount >= GEO_SAMPLE_TARGET) finish()
+    }
+
+    const handleError = (error) => {
+      const fallback = error?.code === error?.PERMISSION_DENIED
+        ? 'Bạn chưa cấp quyền vị trí cho trình duyệt.'
+        : 'Không lấy được vị trí hiện tại. Vui lòng thử lại.'
+      finish(fallback)
+    }
+
+    try {
+      geoWatchRef.current = navigator.geolocation.watchPosition(
+        handlePosition,
+        handleError,
+        {
+          enableHighAccuracy: true,
+          timeout: GEO_TIMEOUT_MS,
+          maximumAge: 0,
+        }
+      )
+      geoTimerRef.current = setTimeout(() => finish(), GEO_SAMPLE_WINDOW_MS)
+    } catch (error) {
+      finish('Không thể khởi động định vị vị trí.')
+    }
+  }
+
+  const useCurrentGeoResult = () => {
+    if (!geoResult) return
+    setEditModalForm((prev) => ({
+      ...prev,
+      latitude: formatCoordinate(geoResult.latitude),
+      longitude: formatCoordinate(geoResult.longitude),
+    }))
+    setGeoAppliedAccuracy(geoResult.accuracy)
+    closeGeoModal()
+  }
+
+  useEffect(() => () => clearGeoSampling(), [])
+
   const buildSessionPayload = (source) => {
     const payload = {
       subject:      source.subject.trim(),
@@ -774,13 +908,16 @@ export default function Sessions() {
     })
     setEditModalErrors(emptyErrors)
     setEditModalMessage('')
+    setGeoAppliedAccuracy(null)
   }
 
   const closeEditModal = () => {
+    closeGeoModal()
     setEditModalTarget(null)
     setEditModalForm(initialModalForm)
     setEditModalErrors(emptyErrors)
     setEditModalMessage('')
+    setGeoAppliedAccuracy(null)
   }
 
   const handleEditModalClassroomChange = (classroomId) => {
@@ -1878,6 +2015,52 @@ export default function Sessions() {
                 )}
               </div>
 
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, gridColumn: '1 / -1', border: '1px solid var(--bdr)', borderRadius: 8, padding: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Cấu hình GPS điểm danh</label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={openGeoModal}
+                    disabled={editModalSaving}
+                    style={{ minHeight: 32, padding: '0 10px', fontSize: 12 }}
+                  >
+                    Lấy vị trí hiện tại
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+                  <input
+                    type="number"
+                    step="any"
+                    aria-label="Latitude"
+                    placeholder="Latitude"
+                    value={editModalForm.latitude}
+                    onChange={(e) => handleEditModalChange('latitude', e.target.value)}
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    aria-label="Longitude"
+                    placeholder="Longitude"
+                    value={editModalForm.longitude}
+                    onChange={(e) => handleEditModalChange('longitude', e.target.value)}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    aria-label="Radius meters"
+                    placeholder="Bán kính cho phép (m)"
+                    value={editModalForm.radius_meters}
+                    onChange={(e) => handleEditModalChange('radius_meters', e.target.value)}
+                  />
+                </div>
+                {geoAppliedAccuracy !== null && Number(editModalForm.radius_meters) > 0 && geoAppliedAccuracy > Number(editModalForm.radius_meters) && (
+                  <div style={{ fontSize: 12, color: '#f59e0b', lineHeight: 1.5 }}>
+                    Accuracy hiện tại lớn hơn bán kính cho phép. Nên tăng bán kính hoặc lấy lại vị trí chính xác hơn.
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, gridColumn: '1 / -1' }}>
                 <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700 }}>Ghi chú</label>
                 <textarea
@@ -1897,6 +2080,129 @@ export default function Sessions() {
                 {editModalSaving ? 'Đang cập nhật...' : 'Cập nhật buổi học'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {geoModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cho phép lấy vị trí hiện tại?"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1015,
+            padding: 12
+          }}
+        >
+          <div
+            style={{
+              width: 'min(520px, 100%)',
+              background: 'var(--navy2)',
+              border: '1px solid var(--bdr2)',
+              borderRadius: 12,
+              padding: 16,
+              boxShadow: 'var(--shadow)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, color: 'var(--white)' }}>Cho phép lấy vị trí hiện tại?</h3>
+              <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--white2)', lineHeight: 1.5 }}>
+                Hệ thống cần quyền vị trí để lấy tọa độ cấu hình điểm danh. Vị trí này chỉ dùng cho chức năng GPS điểm danh.
+              </p>
+            </div>
+
+            {!geoSampling && !geoResult && !geoError && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="secondary" onClick={closeGeoModal}>
+                  Không
+                </button>
+                <button type="button" onClick={startGeoSampling}>
+                  Cho phép
+                </button>
+              </div>
+            )}
+
+            {geoSampling && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, color: 'var(--white2)', lineHeight: 1.5 }}>
+                  Đang lấy vị trí chính xác cao. Hệ thống sẽ chọn mẫu có accuracy tốt nhất trong tối đa 10 giây.
+                </div>
+                {geoResult && (
+                  <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, border: '1px solid var(--bdr)', borderRadius: 8, padding: 10 }}>
+                    <div>Latitude: {formatCoordinate(geoResult.latitude)}</div>
+                    <div>Longitude: {formatCoordinate(geoResult.longitude)}</div>
+                    <div>Accuracy: ± {Math.round(geoResult.accuracy || 0)} mét</div>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" className="secondary" onClick={closeGeoModal}>
+                    Hủy
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!geoSampling && geoError && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, color: '#fb7185', lineHeight: 1.5 }}>
+                  {geoError}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" className="secondary" onClick={closeGeoModal}>
+                    Hủy
+                  </button>
+                  <button type="button" onClick={startGeoSampling}>
+                    Thử lại
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!geoSampling && geoResult && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, color: 'var(--white2)', lineHeight: 1.6, border: '1px solid var(--bdr)', borderRadius: 8, padding: 10 }}>
+                  <div>Latitude: {formatCoordinate(geoResult.latitude)}</div>
+                  <div>Longitude: {formatCoordinate(geoResult.longitude)}</div>
+                  <div>Accuracy: ± {Math.round(geoResult.accuracy || 0)} mét</div>
+                  <div>
+                    Trạng thái:{' '}
+                    <strong style={{ color: getAccuracyStatus(geoResult.accuracy).color }}>
+                      {getAccuracyStatus(geoResult.accuracy).label}
+                    </strong>
+                  </div>
+                </div>
+                {geoResult.accuracy > 80 && (
+                  <div style={{ fontSize: 12, color: '#fb7185', lineHeight: 1.5 }}>
+                    GPS hiện tại chưa đủ chính xác. Nên ra gần cửa sổ/ngoài trời hoặc thử lại.
+                  </div>
+                )}
+                {Number(editModalForm.radius_meters) > 0 && geoResult.accuracy > Number(editModalForm.radius_meters) && (
+                  <div style={{ fontSize: 12, color: '#f59e0b', lineHeight: 1.5 }}>
+                    Accuracy hiện tại lớn hơn bán kính cho phép. Nên tăng bán kính hoặc lấy lại vị trí chính xác hơn.
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" className="secondary" onClick={closeGeoModal}>
+                    Hủy
+                  </button>
+                  <button type="button" className="secondary" onClick={startGeoSampling}>
+                    Thử lại
+                  </button>
+                  <button type="button" onClick={useCurrentGeoResult}>
+                    Dùng tọa độ này
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

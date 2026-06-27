@@ -76,15 +76,6 @@ const getSessionCodeValue = (session) => (
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
 // ------------------------------------------------------------------ //
-const getImageUrl = (path) => {
-  if (!path) return null
-  if (/^https?:\/\//i.test(path)) return path
-  const base = api.defaults.baseURL || ''
-  const host = base.replace(/\/api$/, '')
-  const cleanPath = path.startsWith('/') ? path : `/${path}`
-  return `${host}${cleanPath}`
-}
-
 const getAlertCardStyle = (type) => {
   const t = (type || '').toUpperCase()
   if (t === 'SPOOF') {
@@ -193,11 +184,67 @@ const renderConfidence = (alert) => {
   )
 }
 
-const AlertImage = ({ path }) => {
+const AlertImage = ({ alertId, path }) => {
+  const [imageUrl, setImageUrl] = useState(null)
+  const [loading, setLoading] = useState(Boolean(alertId && path))
   const [hasError, setHasError] = useState(false)
-  const url = getImageUrl(path)
+
+  useEffect(() => {
+    let active = true
+    let objectUrl = null
+
+    setImageUrl(null)
+    setHasError(false)
+
+    if (!alertId || !path) {
+      setLoading(false)
+      return () => {}
+    }
+
+    setLoading(true)
+    api.get(`/media-private/alerts/${alertId}/image`, { responseType: 'blob' })
+      .then((response) => {
+        if (!active) return
+        objectUrl = URL.createObjectURL(response.data)
+        setImageUrl(objectUrl)
+      })
+      .catch(() => {
+        if (active) setHasError(true)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [alertId, path])
   
-  if (hasError || !url) {
+  if (loading) {
+    return (
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 6,
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          color: 'var(--muted)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 10,
+          textAlign: 'center',
+          padding: 4
+        }}
+      >
+        Äang táº£i...
+      </div>
+    )
+  }
+
+  if (hasError || !imageUrl) {
     return (
       <div
         style={{
@@ -222,7 +269,7 @@ const AlertImage = ({ path }) => {
   
   return (
     <img
-      src={url}
+      src={imageUrl}
       alt="Captured alert"
       style={{
         width: 72,
@@ -232,7 +279,7 @@ const AlertImage = ({ path }) => {
         border: '1px solid rgba(255,255,255,0.1)',
         cursor: 'pointer'
       }}
-      onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+      onClick={() => window.open(imageUrl, '_blank', 'noopener,noreferrer')}
       onError={() => setHasError(true)}
     />
   )
@@ -1932,7 +1979,7 @@ export default function Sessions() {
                         }}
                       >
                         {/* Image or fallback */}
-                        <AlertImage path={al.captured_img} />
+                        <AlertImage alertId={al.id} path={al.captured_img} />
 
                         {/* Details */}
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>

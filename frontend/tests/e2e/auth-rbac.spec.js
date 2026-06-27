@@ -119,7 +119,36 @@ async function mockApi(page, options = {}) {
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ total_active: 0 }),
+        body: JSON.stringify({ total_active: 1 }),
+      })
+    }
+
+    if (path === '/alerts/session/1/active' || path === '/alerts/session/1') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 7,
+            session_id: 1,
+            alert_type: 'UNKNOWN_FACE',
+            captured_img: 'media/alerts/1/private.jpg',
+            confidence: 0.42,
+            dismissed: false,
+            created_at: '2026-06-24T08:00:00',
+          },
+        ]),
+      })
+    }
+
+    if (path === '/media-private/alerts/7/image') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+          'base64',
+        ),
       })
     }
 
@@ -244,6 +273,19 @@ test('teacher can export session attendance CSV once with backend filename', asy
 
   expect(download.suggestedFilename()).toBe('attendance_session_1_TEST101.csv')
   expect(seen.filter((item) => item.path === '/reports/export/csv/session/1')).toHaveLength(1)
+})
+
+test('teacher alert image loads through authenticated private media endpoint', async ({ page }) => {
+  const seen = await loginAs(page, 'teacher')
+
+  await page.goto('/sessions')
+  await page.locator('.sessions-view-toggle button').nth(1).click()
+  await page.getByRole('button', { name: /Cảnh báo|Cáº£nh bÃ¡o/i }).first().click()
+
+  await expect.poll(() => (
+    seen.some((item) => item.path === '/media-private/alerts/7/image' && item.auth === `Bearer ${tokenFor('teacher')}`)
+  )).toBeTruthy()
+  expect(seen.some((item) => item.path.startsWith('/media/'))).toBeFalsy()
 })
 
 test('student only sees student-appropriate menus and is blocked from admin routes', async ({ page }) => {

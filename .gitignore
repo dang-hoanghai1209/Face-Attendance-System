@@ -67,3 +67,14 @@ coverage/
 
 # Local private notes
 local_notes/
+
+# Environment files
+backend/.env*
+frontend/.env*
+
+# Private media and generated artifacts
+backend/private_media/
+node_modules/
+__pycache__/.pytest_cache/
+playwright-report/
+test-results/

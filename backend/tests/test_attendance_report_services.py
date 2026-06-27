@@ -5,6 +5,7 @@ import io
 import json
 import unittest
 from datetime import date, datetime, time
+from pathlib import Path
 
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -15,6 +16,7 @@ from fastapi import HTTPException
 from database import Base, SessionLocal, engine
 from models.attendance import Attendance
 from models.attendance_scan import AttendanceScan
+from models.audit_log import AuditLog
 from models.classroom import Classroom
 from models.course_section import CourseSection
 from models.enrollment import Enrollment
@@ -105,6 +107,33 @@ class AttendanceReportServiceTests(unittest.TestCase):
             return b"".join(chunks)
 
         return asyncio.run(collect())
+
+    def report_export_logs(self):
+        return (
+            self.db.query(AuditLog)
+            .filter(AuditLog.action == "report_exported")
+            .order_by(AuditLog.id.asc())
+            .all()
+        )
+
+    def latest_report_export_log(self):
+        logs = self.report_export_logs()
+        return logs[-1] if logs else None
+
+    def assert_report_export_log(self, log, *, user, report_type, row_count, session_id=None):
+        self.assertIsNotNone(log)
+        self.assertEqual(log.actor_username, getattr(user, "username", None))
+        self.assertEqual(log.actor_role, getattr(user, "role", None))
+        self.assertEqual(log.target_type, "report")
+        self.assertEqual(log.target_id, str(session_id or report_type))
+        self.assertEqual(log.details["format"], "csv")
+        self.assertEqual(log.details["report_type"], report_type)
+        self.assertEqual(log.details["row_count"], row_count)
+        self.assertEqual(log.details["actor_username"], getattr(user, "username", None))
+        self.assertEqual(log.details["actor_role"], getattr(user, "role", None))
+        self.assertIn(".csv", log.details["filename"])
+        if session_id is not None:
+            self.assertEqual(log.details["session_id"], session_id)
 
     def add_min_session_enrollments(self, session, student, total=5):
         students = [student]
@@ -237,7 +266,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
         record.note = "checked by camera"
         self.db.commit()
 
-        user = type("User", (), {"role": "admin"})()
+        user = type("User", (), {"role": "admin", "username": "admin"})()
         response = reports.export_session_csv(session.id, current_user=user, db=self.db)
         body = self.collect_streaming_response(response)
 
@@ -252,6 +281,13 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertIn("check_in_img", csv_text.splitlines()[0])
         self.assertIn(student.student_code, csv_text)
         self.assertIn("checked by camera", csv_text)
+        self.assert_report_export_log(
+            self.latest_report_export_log(),
+            user=user,
+            report_type="attendance",
+            row_count=5,
+            session_id=session.id,
+        )
 
     def test_export_session_alerts_csv_parses_json_reason_code_and_handles_text_note(self):
         student = self.add_student()
@@ -278,7 +314,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.db.add_all([json_alert, text_alert])
         self.db.commit()
 
-        user = type("User", (), {"role": "admin"})()
+        user = type("User", (), {"role": "admin", "username": "admin"})()
         response = reports.export_session_alerts_csv(session.id, current_user=user, db=self.db)
         body = self.collect_streaming_response(response)
 
@@ -298,6 +334,14 @@ class AttendanceReportServiceTests(unittest.TestCase):
         self.assertEqual(by_type["UNKNOWN_FACE"]["note"], "plain text note")
         self.assertEqual(by_type["UNKNOWN_FACE"]["confidence_label"], "Độ tin cậy khớp danh tính")
 
+        self.assert_report_export_log(
+            self.latest_report_export_log(),
+            user=user,
+            report_type="session_alerts",
+            row_count=2,
+            session_id=session.id,
+        )
+
     def test_export_session_csv_rejects_student_role(self):
         student = self.add_student()
         session = self.add_session()
@@ -309,6 +353,7 @@ class AttendanceReportServiceTests(unittest.TestCase):
             reports.export_session_csv(session.id, current_user=user, db=self.db)
 
         self.assertEqual(context.exception.status_code, 403)
+        self.assertEqual(self.report_export_logs(), [])
 
     def test_export_session_alerts_csv_rejects_student_role(self):
         student = self.add_student()
@@ -323,6 +368,79 @@ class AttendanceReportServiceTests(unittest.TestCase):
             reports.export_session_alerts_csv(session.id, current_user=user, db=self.db)
 
         self.assertEqual(context.exception.status_code, 403)
+        self.assertEqual(self.report_export_logs(), [])
+
+    def test_export_session_csv_writes_audit_for_teacher_with_session_scope(self):
+        student = self.add_student()
+        session = self.add_session()
+        session.created_by = "teacher01"
+        self.db.commit()
+        self.add_session_enrollments(session, [student])
+
+        user = type("User", (), {"role": "teacher", "username": "teacher01", "full_name": "Teacher One"})()
+        response = reports.export_session_csv(session.id, current_user=user, db=self.db)
+
+        self.assertEqual(response.status_code, 200)
+        self.assert_report_export_log(
+            self.latest_report_export_log(),
+            user=user,
+            report_type="attendance",
+            row_count=1,
+            session_id=session.id,
+        )
+
+    def test_export_session_alerts_csv_writes_audit_for_teacher_with_session_scope(self):
+        student = self.add_student()
+        session = self.add_session()
+        session.created_by = "teacher01"
+        self.db.commit()
+        self.add_session_enrollments(session, [student])
+        self.db.add(SecurityAlert(session_id=session.id, alert_type="UNKNOWN_FACE", student_id=student.id))
+        self.db.commit()
+
+        user = type("User", (), {"role": "teacher", "username": "teacher01", "full_name": "Teacher One"})()
+        response = reports.export_session_alerts_csv(session.id, current_user=user, db=self.db)
+
+        self.assertEqual(response.status_code, 200)
+        self.assert_report_export_log(
+            self.latest_report_export_log(),
+            user=user,
+            report_type="session_alerts",
+            row_count=1,
+            session_id=session.id,
+        )
+
+    def test_export_model_evaluation_csv_writes_audit_for_admin(self):
+        reports_dir = Path(__file__).resolve().parents[1] / "reports"
+        reports_dir.mkdir(exist_ok=True)
+        metrics_path = reports_dir / "test_evaluation_metrics.csv"
+        details_path = reports_dir / "test_evaluation_details.csv"
+        original_metrics_path = reports.EVALUATION_METRICS_CSV
+        original_details_path = reports.EVALUATION_DETAILS_CSV
+        metrics_path.write_text("metric,value\nTotal images,2\nTP,1\nFP,1\nFN,0\nTN,0\n", encoding="utf-8")
+        details_path.write_text(
+            "file_name,actual_student_code,predicted_student_code,status,confidence,result\n"
+            "a.jpg,SV001,SV001,success,0.91,TP\n"
+            "b.jpg,SV002,SV003,success,0.61,FP\n",
+            encoding="utf-8",
+        )
+        reports.EVALUATION_METRICS_CSV = metrics_path
+        reports.EVALUATION_DETAILS_CSV = details_path
+        self.addCleanup(lambda: setattr(reports, "EVALUATION_METRICS_CSV", original_metrics_path))
+        self.addCleanup(lambda: setattr(reports, "EVALUATION_DETAILS_CSV", original_details_path))
+        self.addCleanup(lambda: metrics_path.unlink(missing_ok=True))
+        self.addCleanup(lambda: details_path.unlink(missing_ok=True))
+
+        user = type("User", (), {"role": "admin", "username": "admin"})()
+        response = reports.export_model_evaluation_csv(_current_user=user, db=self.db)
+
+        self.assertEqual(response.status_code, 200)
+        self.assert_report_export_log(
+            self.latest_report_export_log(),
+            user=user,
+            report_type="model_evaluation",
+            row_count=2,
+        )
 
     def test_export_session_csv_rejects_teacher_without_session_scope(self):
         student = self.add_student()

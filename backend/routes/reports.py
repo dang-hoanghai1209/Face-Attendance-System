@@ -3,7 +3,7 @@ import csv
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import pandas as pd
 from reportlab.lib.pagesizes import A4
@@ -18,6 +18,7 @@ from database import get_db
 from models.attendance import Attendance
 from models.security_alert import SecurityAlert
 from models.student import Student
+from services.audit_service import audit_details, audit_safely
 from services.auth_service import get_current_user, require_admin, require_role
 from services import report_service
 
@@ -175,6 +176,26 @@ def _csv_response(rows, fieldnames, filename):
         output,
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+def _audit_csv_export(db: Session, *, current_user, report_type: str, filename: str, row_count: int, session_id=None, request=None):
+    audit_safely(
+        db,
+        action="report_exported",
+        actor_user=current_user,
+        target_type="report",
+        target_id=session_id or report_type,
+        details=audit_details(
+            request=request,
+            format="csv",
+            report_type=report_type,
+            session_id=session_id,
+            filename=filename,
+            row_count=row_count,
+            actor_username=getattr(current_user, "username", None),
+            actor_role=getattr(current_user, "role", None),
+        ),
     )
 
 
@@ -562,18 +583,28 @@ def get_model_evaluation_details(_current_user=Depends(require_admin)):
 
 
 @router.get("/export/model-evaluation/csv")
-def export_model_evaluation_csv(_current_user=Depends(require_admin)):
+def export_model_evaluation_csv(request: Request = None, _current_user=Depends(require_admin), db: Session = Depends(get_db)):
     metrics, details = _read_evaluation_reports()
     if metrics is None or details is None or details.empty:
         raise HTTPException(status_code=404, detail="Không tìm thấy dữ liệu đánh giá mô hình.")
 
+    filename = "model_evaluation_details.csv"
+    records = _evaluation_details_records(details)
     stream = io.StringIO()
-    pd.DataFrame(_evaluation_details_records(details)).to_csv(stream, index=False, encoding="utf-8-sig")
+    pd.DataFrame(records).to_csv(stream, index=False, encoding="utf-8-sig")
     output = io.BytesIO(stream.getvalue().encode("utf-8-sig"))
+    _audit_csv_export(
+        db,
+        current_user=_current_user,
+        report_type="model_evaluation",
+        filename=filename,
+        row_count=len(records),
+        request=request,
+    )
     return StreamingResponse(
         output,
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=model_evaluation_details.csv"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
@@ -724,25 +755,55 @@ def export_warning_excel(class_name: str, current_user=Depends(get_current_user)
 
 
 @router.get("/export/csv/session/{session_id}")
-def export_session_csv(session_id: int, current_user=Depends(require_report_exporter), db: Session = Depends(get_db)):
+def export_session_csv(
+    session_id: int,
+    request: Request = None,
+    current_user=Depends(require_report_exporter),
+    db: Session = Depends(get_db),
+):
     _ensure_report_exporter(current_user)
     session, rows = report_service.build_session_report_for_user(session_id, db, current_user)
     csv_rows = _attendance_csv_rows(session, rows, db)
     filename = _safe_filename(
         f"attendance_session_{session.id}_{session.class_name}_{session.session_date}"
     ) or f"attendance_session_{session.id}"
-    return _csv_response(csv_rows, ATTENDANCE_CSV_COLUMNS, f"{filename}.csv")
+    filename = f"{filename}.csv"
+    _audit_csv_export(
+        db,
+        current_user=current_user,
+        report_type="attendance",
+        session_id=session.id,
+        filename=filename,
+        row_count=len(csv_rows),
+        request=request,
+    )
+    return _csv_response(csv_rows, ATTENDANCE_CSV_COLUMNS, filename)
 
 
 @router.get("/export/csv/session/{session_id}/alerts")
-def export_session_alerts_csv(session_id: int, current_user=Depends(require_report_exporter), db: Session = Depends(get_db)):
+def export_session_alerts_csv(
+    session_id: int,
+    request: Request = None,
+    current_user=Depends(require_report_exporter),
+    db: Session = Depends(get_db),
+):
     _ensure_report_exporter(current_user)
     session, _rows = report_service.build_session_report_for_user(session_id, db, current_user)
     csv_rows = _security_alert_csv_rows(session_id, db)
     filename = _safe_filename(
         f"security_alerts_session_{session.id}_{session.class_name}_{session.session_date}"
     ) or f"security_alerts_session_{session.id}"
-    return _csv_response(csv_rows, SECURITY_ALERT_CSV_COLUMNS, f"{filename}.csv")
+    filename = f"{filename}.csv"
+    _audit_csv_export(
+        db,
+        current_user=current_user,
+        report_type="session_alerts",
+        session_id=session.id,
+        filename=filename,
+        row_count=len(csv_rows),
+        request=request,
+    )
+    return _csv_response(csv_rows, SECURITY_ALERT_CSV_COLUMNS, filename)
 
 
 @router.get("/export/excel/session/{session_id}")

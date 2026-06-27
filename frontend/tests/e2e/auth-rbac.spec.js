@@ -321,7 +321,7 @@ test('teacher can fill session GPS from current location and sees poor accuracy 
   await loginAs(page, 'teacher')
 
   await page.goto('/sessions')
-  await page.getByRole('button', { name: /Chi/i }).first().click()
+  await page.locator('.sessions-view-toggle button').nth(1).click()
   await page.getByRole('button', { name: /Sửa|Sá»­a/i }).first().click()
 
   await page.getByRole('button', { name: 'Lấy vị trí hiện tại' }).click()

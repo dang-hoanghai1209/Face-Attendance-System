@@ -1518,7 +1518,7 @@ export default function Sessions() {
                             >
                               {exportingSessionId === session.id && exportType === 'alerts' ? '...' : '📥 Cảnh báo'}
                             </button>
-                            <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
+                            <button className="secondary" onClick={() => openEditModal(session)} disabled={loading}>
                               Sửa
                             </button>
                             <button
@@ -1633,7 +1633,7 @@ export default function Sessions() {
                           </span>
                         )}
                       </button>
-                      <button className="secondary" onClick={() => handleEdit(session)} disabled={loading}>
+                      <button className="secondary" onClick={() => openEditModal(session)} disabled={loading}>
                         Sửa
                       </button>
                       <button

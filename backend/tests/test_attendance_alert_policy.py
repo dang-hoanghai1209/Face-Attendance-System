@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date, datetime, time
+from pathlib import Path
 
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -11,7 +12,7 @@ from models.enrollment import Enrollment
 from models.security_alert import SecurityAlert
 from models.session import Session as ClassSession
 from models.student import Student
-from services import attendance_service
+from services import attendance_service, security_alert_service
 
 
 class AttendanceAlertPolicyTests(unittest.TestCase):
@@ -19,9 +20,13 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
         Base.metadata.drop_all(bind=engine)
         Base.metadata.create_all(bind=engine)
         self.db = SessionLocal()
+        self.created_files = []
 
     def tearDown(self):
         self.db.close()
+        for path in self.created_files:
+            if path.exists():
+                path.unlink()
         Base.metadata.drop_all(bind=engine)
 
     def add_student(self, code="SV001", full_name="Student 1", class_name="64-TTQL-1"):
@@ -84,6 +89,14 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
     def attendance_count(self):
         return self.db.query(Attendance).count()
 
+    def write_source_capture(self, content=b"unclear-face"):
+        relative_path = Path("media") / "recognition_attempts" / "test_face_unclear.jpg"
+        path = security_alert_service.BASE_DIR / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        self.created_files.append(path)
+        return str(relative_path).replace("\\", "/"), content
+
     def test_liveness_fail_creates_spoof_alert_without_attendance(self):
         student, session = self.add_enrolled_session()
 
@@ -129,6 +142,53 @@ class AttendanceAlertPolicyTests(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         self.assertEqual(alerts[0].confidence, 0.2)
         self.assertEqual(alerts[0].captured_img, "media/captures/unknown.jpg")
+        self.assertEqual(self.attendance_count(), 0)
+
+    def test_face_unclear_creates_alert_snapshot_without_attendance(self):
+        _student, session = self.add_enrolled_session()
+        image_path, image_bytes = self.write_source_capture()
+
+        response = attendance_service.record_checkin(
+            self.db,
+            None,
+            session.id,
+            confidence=0.98,
+            image_path=image_path,
+            gps_lat=session.latitude,
+            gps_lng=session.longitude,
+            recognition_status="FACE_UNCLEAR",
+            reason_code="LOW_SHARPNESS",
+            quality_details={
+                "sharpness": 2.0,
+                "brightness": 120.0,
+                "face_size_ratio": 0.2,
+                "detection_confidence": 0.98,
+                "failed_checks": ["LOW_SHARPNESS"],
+            },
+        )
+
+        alerts = self.alerts("FACE_UNCLEAR")
+        self.assertEqual(response["status"], "FACE_UNCLEAR")
+        self.assertFalse(response["success"])
+        self.assertFalse(response["recorded"])
+        self.assertFalse(response["attendance_created"])
+        self.assertTrue(response["retry_allowed"])
+        self.assertTrue(response["alert_created"])
+        self.assertEqual(response["alert_type"], "FACE_UNCLEAR")
+        self.assertEqual(response["reason_code"], "LOW_SHARPNESS")
+        self.assertEqual(response["quality"]["failed_checks"], ["LOW_SHARPNESS"])
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0].alert_type, "FACE_UNCLEAR")
+        self.assertEqual(alerts[0].confidence, 0.98)
+        self.assertIsNone(alerts[0].student_id)
+        self.assertIsInstance(alerts[0].captured_img, str)
+        self.assertTrue(alerts[0].captured_img.startswith(f"media/security_snapshots/{session.id}/"))
+        self.assertTrue(alerts[0].captured_img.endswith("_LOW_SHARPNESS.jpg"))
+        self.assertEqual(response["snapshot_path"], f"/{alerts[0].captured_img}")
+        saved_path = security_alert_service.BASE_DIR / Path(alerts[0].captured_img)
+        self.created_files.append(saved_path)
+        self.assertTrue(saved_path.exists())
+        self.assertEqual(saved_path.read_bytes(), image_bytes)
         self.assertEqual(self.attendance_count(), 0)
 
     def test_recognized_student_not_enrolled_creates_alert_without_attendance(self):

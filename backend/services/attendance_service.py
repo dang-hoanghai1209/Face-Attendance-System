@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from math import asin, cos, radians, sin, sqrt
 
@@ -15,6 +16,7 @@ from services.security_alert_service import create_alert
 from services.timezone_service import now_in_app_timezone
 
 
+logger = logging.getLogger("face_attendance")
 EARLY_CHECKIN_MINUTES = 15
 PRESENT_WINDOW_MINUTES = 1
 LATE_THRESHOLD_MINUTES = 10
@@ -118,11 +120,19 @@ def count_session_enrollments(db: Session, session: ClassSession):
     )
 
 
-def _security_alert_response(status: str, message: str, alert):
+def _public_media_path(path: str | None):
+    if not path:
+        return None
+    normalized = path.replace("\\", "/")
+    return normalized if normalized.startswith("/") else f"/{normalized}"
+
+
+def _security_alert_response(status: str, message: str, alert, **extra):
     return {
         "status": status,
         "success": False,
         "recorded": False,
+        "attendance_created": False,
         "reason": status,
         "message": message,
         "alert_id": alert.id,
@@ -132,6 +142,9 @@ def _security_alert_response(status: str, message: str, alert):
         "confidence": alert.confidence,
         "liveness_score": alert.liveness_score,
         "has_captured_img": bool(alert.captured_img),
+        "snapshot_path": _public_media_path(alert.captured_img),
+        "alert_created": True,
+        **extra,
     }
 
 
@@ -344,7 +357,7 @@ def already_checked_in_response(record: Attendance, student: Student, session: C
 
 def record_checkin(
     db: Session,
-    student_code: str,
+    student_code: str | None,
     session_id: int,
     confidence=None,
     image_path=None,
@@ -354,9 +367,55 @@ def record_checkin(
     liveness_passed=None,
     liveness_score=None,
     recognition_status=None,
+    reason_code=None,
+    quality_details=None,
 ):
     session = get_session_or_404(db, session_id)
     normalized_recognition_status = (recognition_status or "").lower()
+
+    if normalized_recognition_status == "face_unclear":
+        reason_code = reason_code or "LOW_FACE_QUALITY"
+        message = "KhuÃ´n máº·t chÆ°a rÃµ. Vui lÃ²ng thÃ¡o kháº©u trang náº¿u cÃ³, nhÃ¬n tháº³ng vÃ o camera vÃ  thá»­ láº¡i."
+        try:
+            alert = create_alert(
+                db,
+                session_id=session_id,
+                alert_type="FACE_UNCLEAR",
+                source_image_path=image_path,
+                confidence=confidence,
+                liveness_score=liveness_score,
+                gps_lat=gps_lat,
+                gps_lng=gps_lng,
+                reason_code=reason_code,
+                quality_details=quality_details,
+            )
+            response = _security_alert_response(
+                "FACE_UNCLEAR",
+                message,
+                alert,
+                reason_code=reason_code,
+                retry_allowed=True,
+                quality=quality_details or {},
+            )
+            response["attendance_created"] = False
+            return response
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to create FACE_UNCLEAR security alert for session_id=%s", session_id)
+            return {
+                "status": "FACE_UNCLEAR",
+                "success": False,
+                "recorded": False,
+                "attendance_created": False,
+                "reason": "FACE_UNCLEAR",
+                "reason_code": reason_code,
+                "message": message,
+                "retry_allowed": True,
+                "alert_created": False,
+                "alert_type": "FACE_UNCLEAR",
+                "snapshot_path": None,
+                "quality": quality_details or {},
+            }
 
     if liveness_passed is False:
         alert = create_alert(
@@ -537,6 +596,8 @@ def record_checkin(
                 liveness_passed=liveness_passed,
                 liveness_score=liveness_score,
                 recognition_status=recognition_status,
+                reason_code=reason_code,
+                quality_details=quality_details,
             )
         raise HTTPException(status_code=409, detail="Bản ghi điểm danh đã tồn tại.") from exc
     db.refresh(record)

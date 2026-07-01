@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import shutil
 from uuid import uuid4
 
 from models.security_alert import SecurityAlert
@@ -41,6 +42,41 @@ def save_face_unclear_snapshot(session_id: int, image_bytes: bytes | None, reaso
     return str(relative_dir / filename).replace("\\", "/")
 
 
+def _resolve_media_source_path(source_path: str | None):
+    if not source_path:
+        return None
+
+    normalized = source_path.lstrip("/").replace("\\", "/")
+    candidate = BASE_DIR / normalized
+    try:
+        resolved_base = BASE_DIR.resolve()
+        resolved_candidate = candidate.resolve()
+    except OSError:
+        return None
+    if resolved_base not in resolved_candidate.parents and resolved_candidate != resolved_base:
+        return None
+    if not resolved_candidate.is_file():
+        return None
+    return resolved_candidate
+
+
+def save_face_unclear_snapshot_from_path(session_id: int, source_path: str | None, reason_code: str | None):
+    source = _resolve_media_source_path(source_path)
+    if source is None:
+        return None
+
+    now = now_in_app_timezone()
+    safe_reason = "".join(char for char in (reason_code or "LOW_FACE_QUALITY") if char.isalnum() or char == "_")
+    relative_dir = Path("media") / "security_snapshots" / str(session_id)
+    output_dir = BASE_DIR / relative_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{safe_reason}.jpg"
+    output_path = output_dir / filename
+    shutil.copyfile(source, output_path)
+    return str(relative_dir / filename).replace("\\", "/")
+
+
 def create_alert(
     db,
     *,
@@ -48,6 +84,7 @@ def create_alert(
     alert_type: str,
     student_id: int | None = None,
     image_bytes: bytes | None = None,
+    source_image_path: str | None = None,
     captured_img: str | None = None,
     confidence: float | None = None,
     liveness_score: float | None = None,
@@ -80,7 +117,10 @@ def create_alert(
         student_id=student_id,
         captured_img=captured_img
         or (
-            save_face_unclear_snapshot(session_id, image_bytes, reason_code)
+            (
+                save_face_unclear_snapshot(session_id, image_bytes, reason_code)
+                or save_face_unclear_snapshot_from_path(session_id, source_image_path, reason_code)
+            )
             if normalized_type == "FACE_UNCLEAR"
             else save_alert_capture(session_id, image_bytes)
         ),

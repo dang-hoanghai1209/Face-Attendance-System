@@ -119,6 +119,34 @@ class SecurityAlertServiceTests(unittest.TestCase):
         self.assertTrue(saved_path.exists())
         self.assertEqual(saved_path.read_bytes(), image_bytes)
 
+    def test_create_face_unclear_alert_copies_snapshot_from_source_path(self):
+        session = self.add_session()
+        source_relative = Path("media") / "recognition_attempts" / "source-face.jpg"
+        source_path = security_alert_service.BASE_DIR / source_relative
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"source-capture-bytes")
+        self.created_files.append(source_path)
+
+        alert = security_alert_service.create_alert(
+            self.db,
+            session_id=session.id,
+            alert_type="FACE_UNCLEAR",
+            source_image_path=str(source_relative).replace("\\", "/"),
+            confidence=0.91,
+            reason_code="LOW_SHARPNESS",
+            quality_details={"sharpness": 3.5},
+        )
+
+        self.assertIsNotNone(alert.captured_img)
+        self.assertTrue(alert.captured_img.startswith(f"media/security_snapshots/{session.id}/"))
+        self.assertTrue(alert.captured_img.endswith("_LOW_SHARPNESS.jpg"))
+        saved_path = security_alert_service.BASE_DIR / Path(alert.captured_img)
+        self.created_files.append(saved_path)
+        self.assertTrue(saved_path.exists())
+        self.assertEqual(saved_path.read_bytes(), b"source-capture-bytes")
+        note = json.loads(alert.note)
+        self.assertEqual(note["quality"]["sharpness"], 3.5)
+
     def test_create_alert_persists_student_liveness_and_gps_fields(self):
         session = self.add_session()
         student = self.add_student()

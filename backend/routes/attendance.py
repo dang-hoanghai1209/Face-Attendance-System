@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -38,7 +38,7 @@ ATTENDANCE_AUDIT_FIELDS = (
 
 
 class AttendanceCheckIn(BaseModel):
-    student_code: str
+    student_code: Optional[str] = None
     session_id: int
     confidence: Optional[float] = None
     image_path: Optional[str] = None
@@ -49,6 +49,8 @@ class AttendanceCheckIn(BaseModel):
     liveness_score: Optional[float] = None
     recognition_status: Optional[str] = None
     mode: Optional[str] = None
+    reason_code: Optional[str] = None
+    quality: Optional[dict[str, Any]] = None
 
 
 class AttendanceCheckOut(BaseModel):
@@ -58,6 +60,8 @@ class AttendanceCheckOut(BaseModel):
 
 
 def _attendance_snapshot_by_student_code(db: Session, student_code: str, session_id: int):
+    if not student_code:
+        return None
     student = db.query(Student).filter(Student.student_code == student_code).first()
     if not student:
         return None
@@ -103,6 +107,8 @@ def _checkin_response(db: Session, data: AttendanceCheckIn):
             liveness_passed=data.liveness_passed,
             liveness_score=data.liveness_score,
             recognition_status=data.recognition_status,
+            reason_code=data.reason_code,
+            quality_details=data.quality,
         )
     except HTTPException as exc:
         if isinstance(exc.detail, dict) and exc.detail.get("status"):
@@ -123,7 +129,10 @@ def record_attendance(
         data.student_code,
         current_user.username,
     )
-    require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    if data.student_code:
+        require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    elif (data.recognition_status or "").upper() != "FACE_UNCLEAR":
+        raise HTTPException(status_code=400, detail="Thiáº¿u mÃ£ sinh viÃªn cho Ä‘iá»ƒm danh.")
     old_value = _attendance_snapshot_by_student_code(db, data.student_code, data.session_id)
     response = _checkin_response(db, data)
     _audit_attendance_response(db, "attendance_checkin", current_user, data, response, request, old_value)
@@ -143,7 +152,10 @@ def record_checkin(
         data.student_code,
         current_user.username,
     )
-    require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    if data.student_code:
+        require_student_self_or_role(db, current_user, data.student_code, "admin", "teacher")
+    elif (data.recognition_status or "").upper() != "FACE_UNCLEAR":
+        raise HTTPException(status_code=400, detail="Thiáº¿u mÃ£ sinh viÃªn cho Ä‘iá»ƒm danh.")
     old_value = _attendance_snapshot_by_student_code(db, data.student_code, data.session_id)
     response = _checkin_response(db, data)
     _audit_attendance_response(db, "attendance_checkin", current_user, data, response, request, old_value)

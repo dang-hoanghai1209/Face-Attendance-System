@@ -134,6 +134,12 @@ async function mockApi(page, options = {}) {
             alert_type: 'UNKNOWN_FACE',
             has_captured_img: true,
             confidence: 0.42,
+            liveness_score: 0.88,
+            gps_lat: '12.238912',
+            gps_lng: '109.196748',
+            student_code: '64100001',
+            full_name: 'Student User',
+            class_name: '64CNTT',
             dismissed: false,
             created_at: '2026-06-24T08:00:00',
           },
@@ -275,16 +281,26 @@ test('teacher can export session attendance CSV once with backend filename', asy
   expect(seen.filter((item) => item.path === '/reports/export/csv/session/1')).toHaveLength(1)
 })
 
-test('teacher alert image opens in-app preview through authenticated private media endpoint', async ({ page }) => {
+test('teacher alert detail drawer renders alerts and opens image preview through private endpoint', async ({ page }) => {
   const seen = await loginAs(page, 'teacher')
+  const pageErrors = []
+  page.on('pageerror', (error) => {
+    pageErrors.push(error.message)
+  })
   let popupOpened = false
   page.on('popup', () => {
     popupOpened = true
   })
 
   await page.goto('/sessions')
-  await page.locator('.sessions-view-toggle button').nth(1).click()
-  await page.getByRole('button', { name: /Cảnh báo|Cáº£nh bÃ¡o/i }).first().click()
+  await page.getByRole('button', { name: /Chi/i }).first().click()
+  await page.getByRole('button', { name: /Xem canh bao buoi 1/i }).click()
+
+  await expect(page.getByRole('dialog').filter({ hasText: /Cảnh báo|Cáº£nh bÃ¡o/i })).toBeVisible()
+  await expect(page.getByText(/UNKNOWN_FACE|UNKNOWN/i)).toBeVisible()
+  await expect(page.getByText(/64100001|Student User/i)).toBeVisible()
+  await expect(page.getByText(/GPS:/i)).toBeVisible()
+  await expect(page.getByText(/88%/i)).toBeVisible()
 
   const thumbnail = page.getByRole('button', { name: /Xem anh canh bao 7/i })
   await expect(thumbnail).toBeVisible()
@@ -299,6 +315,7 @@ test('teacher alert image opens in-app preview through authenticated private med
     seen.some((item) => item.path === '/media-private/alerts/7/image' && item.auth === `Bearer ${tokenFor('teacher')}`)
   )).toBeTruthy()
   expect(seen.some((item) => item.path.startsWith('/media/alerts'))).toBeFalsy()
+  expect(pageErrors).toEqual([])
 })
 
 test('teacher can fill session GPS from current location and sees poor accuracy warning', async ({ page }) => {

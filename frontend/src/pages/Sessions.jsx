@@ -91,8 +91,56 @@ const formatCoordinate = (value) => (
 // ------------------------------------------------------------------ //
 // Helpers for Alerts
 // ------------------------------------------------------------------ //
+const ALERT_TYPE_MAP = {
+  'FACE_UNCLEAR': 'Khuôn mặt chưa rõ',
+  'SPOOF': 'Nghi ngờ giả mạo',
+  'FACE_UNKNOWN': 'Không nhận diện được khuôn mặt',
+  'UNKNOWN_FACE': 'Không nhận diện được khuôn mặt',
+  'UNKNOWN': 'Không nhận diện được khuôn mặt',
+  'MULTIPLE_FACES_DETECTED': 'Phát hiện nhiều khuôn mặt',
+  'GPS_FAILED': 'Không đạt điều kiện vị trí',
+  'GPS_OUT_OF_RANGE': 'Không đạt điều kiện vị trí',
+  'OUTSIDE_TIME_WINDOW': 'Ngoài khung giờ điểm danh',
+  'NOT_ENROLLED': 'Không thuộc lớp học phần',
+  'LATE_ENTRY': 'Đi học muộn',
+}
+
+const REASON_CODE_MAP = {
+  'LOW_SHARPNESS': 'Ảnh bị mờ',
+  'LOW_BRIGHTNESS': 'Ảnh quá tối',
+  'HIGH_BRIGHTNESS': 'Ảnh quá sáng',
+  'FACE_TOO_SMALL': 'Khuôn mặt quá xa camera',
+  'POSE_OUT_OF_RANGE': 'Vui lòng nhìn thẳng vào camera',
+  'LANDMARK_MISSING': 'Không thấy rõ mắt, mũi hoặc miệng',
+  'LANDMARK_GEOMETRY_INVALID': 'Góc mặt chưa phù hợp',
+  'LOW_DETECTION_CONFIDENCE': 'Camera chưa nhận rõ khuôn mặt',
+  'LOW_FACE_QUALITY': 'Chất lượng khuôn mặt chưa đạt',
+}
+
+const renderQuality = (quality) => {
+  if (quality === null || quality === undefined) return null
+  if (typeof quality === 'object') {
+    return Object.entries(quality)
+      .map(([k, v]) => {
+        let valStr = String(v)
+        if (typeof v === 'number') {
+          if (v <= 1 && v >= 0) valStr = `${(v * 100).toFixed(0)}%`
+          else valStr = v.toFixed(1)
+        }
+        return `${k}: ${valStr}`
+      })
+      .join(', ')
+  }
+  if (typeof quality === 'number' && quality <= 1) {
+    return `${(quality * 100).toFixed(0)}%`
+  }
+  return String(quality)
+}
+
 const getAlertCardStyle = (type) => {
   const t = (type || '').toUpperCase()
+  const friendlyLabel = ALERT_TYPE_MAP[t] || type || 'Cảnh báo bảo mật'
+  
   if (t === 'SPOOF') {
     return {
       border: '1px solid rgba(239, 68, 68, 0.3)',
@@ -100,17 +148,17 @@ const getAlertCardStyle = (type) => {
       color: '#fca5a5',
       badgeBg: 'rgba(239, 68, 68, 0.15)',
       badgeColor: '#ef4444',
-      label: 'Giả mạo khuôn mặt (SPOOF)'
+      label: friendlyLabel
     }
   }
-  if (t === 'UNKNOWN_FACE' || t === 'UNKNOWN') {
+  if (t === 'UNKNOWN_FACE' || t === 'UNKNOWN' || t === 'FACE_UNKNOWN') {
     return {
       border: '1px solid rgba(249, 115, 22, 0.3)',
       background: 'rgba(249, 115, 22, 0.06)',
       color: '#ffedd5',
       badgeBg: 'rgba(249, 115, 22, 0.15)',
       badgeColor: '#f97316',
-      label: 'Khuôn mặt lạ (UNKNOWN)'
+      label: friendlyLabel
     }
   }
   if (t === 'FACE_UNCLEAR') {
@@ -120,7 +168,7 @@ const getAlertCardStyle = (type) => {
       color: '#fef3c7',
       badgeBg: 'rgba(245, 158, 11, 0.15)',
       badgeColor: '#f59e0b',
-      label: 'Khuôn mặt chưa rõ (FACE_UNCLEAR)'
+      label: friendlyLabel
     }
   }
   if (t === 'NOT_ENROLLED') {
@@ -130,7 +178,7 @@ const getAlertCardStyle = (type) => {
       color: '#f3e8ff',
       badgeBg: 'rgba(168, 85, 247, 0.15)',
       badgeColor: '#a855f7',
-      label: 'Không thuộc lớp HP (NOT_ENROLLED)'
+      label: friendlyLabel
     }
   }
   if (t === 'GPS_FAILED' || t === 'GPS_OUT_OF_RANGE') {
@@ -140,17 +188,17 @@ const getAlertCardStyle = (type) => {
       color: '#dbeafe',
       badgeBg: 'rgba(59, 130, 246, 0.15)',
       badgeColor: '#3b82f6',
-      label: t === 'GPS_OUT_OF_RANGE' ? 'GPS ngoài bán kính' : 'Lỗi định vị GPS'
+      label: friendlyLabel
     }
   }
-  if (t === 'LATE_ENTRY') {
+  if (t === 'LATE_ENTRY' || t === 'OUTSIDE_TIME_WINDOW') {
     return {
       border: '1px solid rgba(59, 130, 246, 0.3)',
       background: 'rgba(59, 130, 246, 0.06)',
       color: '#dbeafe',
       badgeBg: 'rgba(59, 130, 246, 0.15)',
       badgeColor: '#3b82f6',
-      label: 'Đi học muộn (LATE_ENTRY)'
+      label: friendlyLabel
     }
   }
   return {
@@ -159,7 +207,7 @@ const getAlertCardStyle = (type) => {
     color: 'var(--white)',
     badgeBg: 'rgba(255,255,255,0.05)',
     badgeColor: 'var(--white2)',
-    label: type
+    label: friendlyLabel
   }
 }
 
@@ -257,7 +305,7 @@ const AlertImage = ({ alertId, hasImage, onPreview }) => {
           padding: 4
         }}
       >
-        Khong co anh
+        Không có ảnh bằng chứng
       </div>
     )
   }
@@ -280,7 +328,7 @@ const AlertImage = ({ alertId, hasImage, onPreview }) => {
           padding: 4
         }}
       >
-        Äang táº£i...
+        Đang tải...
       </div>
     )
   }
@@ -303,7 +351,7 @@ const AlertImage = ({ alertId, hasImage, onPreview }) => {
           padding: 4
         }}
       >
-        Không tải được ảnh
+        Không tải được ảnh bằng chứng
       </div>
     )
   }
@@ -1477,6 +1525,7 @@ export default function Sessions() {
                           <button
                             className="secondary"
                             onClick={() => handleOpenAlerts(session)}
+                            aria-label={`Xem canh bao buoi ${session.id}`}
                             disabled={loading}
                             style={{
                               position: 'relative',
@@ -1610,6 +1659,7 @@ export default function Sessions() {
                       <button
                         className="secondary"
                         onClick={() => handleOpenAlerts(session)}
+                        aria-label={`Xem canh bao buoi ${session.id}`}
                         disabled={loading}
                         style={{
                           position: 'relative',
@@ -1790,6 +1840,7 @@ export default function Sessions() {
                         <button
                           className="secondary"
                           onClick={() => handleOpenAlerts(s)}
+                          aria-label={`Xem canh bao buoi ${s.id}`}
                           disabled={loading}
                           style={{
                             position: 'relative',
@@ -2339,15 +2390,24 @@ export default function Sessions() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {activeAlerts.map((al) => {
+                  {activeAlerts.map((rawAlert, index) => {
+                    const al = rawAlert || {}
                     const style = getAlertCardStyle(al.alert_type)
                     const parsedNote = parseNoteSafely(al.note)
                     const reasonCode = parsedNote?.reason_code || null
                     const noteText = parsedNote ? null : al.note
+                    const alertId = al.id ?? `unknown-${index}`
+                    const gpsLat = Number(al.gps_lat)
+                    const gpsLng = Number(al.gps_lng)
+                    const livenessScore = Number(al.liveness_score)
+                    if (Number.isFinite(gpsLat) && Number.isFinite(gpsLng)) {
+                      al.gps_lat = gpsLat
+                      al.gps_lng = gpsLng
+                    }
                     
                     return (
                       <div
-                        key={al.id}
+                        key={alertId}
                         style={{
                           display: 'flex',
                           gap: 12,
@@ -2359,7 +2419,7 @@ export default function Sessions() {
                         }}
                       >
                         {/* Image or fallback */}
-                        <AlertImage alertId={al.id} hasImage={al.has_captured_img} onPreview={openAlertImagePreview} />
+                        <AlertImage alertId={al.id} hasImage={Boolean(al.id && al.has_captured_img)} onPreview={openAlertImagePreview} />
 
                         {/* Details */}
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -2375,7 +2435,7 @@ export default function Sessions() {
                                 color: style.badgeColor
                               }}
                             >
-                              {style.label}
+                              {style.label} ({al.alert_type})
                             </span>
                             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                               {al.created_at ? new Date(al.created_at).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : ''}
@@ -2401,17 +2461,27 @@ export default function Sessions() {
 
                           {reasonCode && (
                             <div style={{ fontSize: 11, color: 'var(--white2)' }}>
-                              Mã lý do: <strong style={{ color: style.badgeColor }}>{reasonCode}</strong>
+                              Mã lý do: <strong>{reasonCode}</strong>
                             </div>
                           )}
+                          <div style={{ fontSize: 11, color: 'var(--white2)' }}>
+                            Chi tiết lý do: <strong style={{ color: style.badgeColor }}>
+                              {REASON_CODE_MAP[reasonCode] || 'Không có lý do chi tiết'}
+                            </strong>
+                          </div>
                           {parsedNote?.quality !== undefined && (
                             <div style={{ fontSize: 11, color: 'var(--white2)' }}>
-                              Chất lượng: <strong>{typeof parsedNote.quality === 'number' && parsedNote.quality <= 1 ? (parsedNote.quality * 100).toFixed(0) + '%' : parsedNote.quality}</strong>
+                              Chi tiết chất lượng: <strong>{renderQuality(parsedNote.quality)}</strong>
                             </div>
                           )}
                           {parsedNote?.detection_confidence !== undefined && (
                             <div style={{ fontSize: 11, color: 'var(--white2)' }}>
                               Độ tin cậy phát hiện: <strong>{(parsedNote.detection_confidence * 100).toFixed(0)}%</strong>
+                            </div>
+                          )}
+                          {(parsedNote?.device || parsedNote?.user_agent || parsedNote?.userAgent || al.device || al.user_agent) && (
+                            <div style={{ fontSize: 11, color: 'var(--white2)' }}>
+                              Thiết bị: <strong>{parsedNote?.device || parsedNote?.user_agent || parsedNote?.userAgent || al.device || al.user_agent}</strong>
                             </div>
                           )}
 
@@ -2423,10 +2493,10 @@ export default function Sessions() {
 
                           <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 2 }}>
                             {renderConfidence(al)}
-                            {al.liveness_score !== null && al.liveness_score !== undefined && (
+                            {Number.isFinite(livenessScore) && (
                               <span>Điểm kiểm tra khuôn mặt thật: {(al.liveness_score * 100).toFixed(0)}%</span>
                             )}
-                            {al.gps_lat !== null && al.gps_lat !== undefined && (
+                            {Number.isFinite(gpsLat) && Number.isFinite(gpsLng) && (
                               <span>GPS: {al.gps_lat.toFixed(5)}, {al.gps_lng.toFixed(5)}</span>
                             )}
                           </div>
@@ -2446,7 +2516,7 @@ export default function Sessions() {
                               background: 'rgba(255,255,255,0.02)',
                               color: 'var(--white2)'
                             }}
-                            disabled={alertLoading}
+                            disabled={alertLoading || !al.id}
                           >
                             Duyệt cảnh báo
                           </button>

@@ -5,8 +5,6 @@ import sys
 from pathlib import Path
 
 from PIL import Image
-import torch
-from facenet_pytorch import MTCNN
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -18,6 +16,7 @@ from services.face_quality_service import (  # noqa: E402
     calculate_brightness,
     calculate_sharpness,
     evaluate_face_quality,
+    face_quality_config_from_env,
     load_face_quality_thresholds_from_env,
 )
 
@@ -45,6 +44,32 @@ def _face_candidate(index, box, probability):
 def analyze_image(image_path: Path) -> dict:
     image = Image.open(image_path).convert("RGB")
     thresholds = load_face_quality_thresholds_from_env()
+    threshold_config = face_quality_config_from_env()
+    try:
+        import torch
+        from facenet_pytorch import MTCNN
+    except ImportError as exc:
+        return {
+            "image_path": str(image_path),
+            "image_size": {"width": image.size[0], "height": image.size[1]},
+            "thresholds": asdict(thresholds),
+            "threshold_config": threshold_config,
+            "metric_descriptions": METRIC_DESCRIPTIONS,
+            "face_detected": False,
+            "face_count": 0,
+            "bbox": None,
+            "detection_probability": None,
+            "landmarks": None,
+            "sharpness": calculate_sharpness(image),
+            "brightness": calculate_brightness(image),
+            "face_size_ratio": None,
+            "pose": {"yaw": None, "pitch": None, "roll": None},
+            "failed_checks": ["DETECTOR_IMPORT_FAILED"],
+            "reason_code": "DETECTOR_IMPORT_FAILED",
+            "final_result": "FAIL",
+            "error": f"Could not import MTCNN dependencies: {exc}",
+        }
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     detector = MTCNN(keep_all=True, device=device)
     boxes, probabilities, landmarks = detector.detect(image, landmarks=True)
@@ -54,6 +79,7 @@ def analyze_image(image_path: Path) -> dict:
             "image_path": str(image_path),
             "image_size": {"width": image.size[0], "height": image.size[1]},
             "thresholds": asdict(thresholds),
+            "threshold_config": threshold_config,
             "metric_descriptions": METRIC_DESCRIPTIONS,
             "face_detected": False,
             "face_count": 0,
@@ -65,10 +91,11 @@ def analyze_image(image_path: Path) -> dict:
             "sharpness": calculate_sharpness(image),
             "brightness": calculate_brightness(image),
             "face_size_ratio": None,
-            "yaw_estimate": None,
+            "pose": {"yaw": None, "pitch": None, "roll": None},
             "landmark_geometry_valid": False,
+            "failed_checks": ["FACE_NOT_DETECTED"],
             "reason_code": "FACE_NOT_DETECTED",
-            "final_result": "FACE_UNCLEAR",
+            "final_result": "FAIL",
         }
 
     face_items = []
@@ -79,12 +106,22 @@ def analyze_image(image_path: Path) -> dict:
 
     probability, index, bbox = face_items[0]
     face_landmarks = landmarks[index] if landmarks is not None else None
-    quality = evaluate_face_quality(image, bbox, probability, face_landmarks, thresholds=thresholds)
+    quality = evaluate_face_quality(
+        image,
+        {
+            "bbox": bbox,
+            "detection_confidence": probability,
+            "landmarks": face_landmarks,
+        },
+        config=thresholds,
+    )
+    details = quality["details"]
 
     return {
         "image_path": str(image_path),
         "image_size": {"width": image.size[0], "height": image.size[1]},
         "thresholds": asdict(thresholds),
+        "threshold_config": threshold_config,
         "metric_descriptions": METRIC_DESCRIPTIONS,
         "face_detected": True,
         "face_count": len(boxes),
@@ -96,13 +133,16 @@ def analyze_image(image_path: Path) -> dict:
         "bbox": _bbox_to_plain_list(bbox),
         "detection_probability": round(probability, 4),
         "landmarks": _to_plain_list(face_landmarks),
-        "sharpness": quality.metrics.sharpness,
-        "brightness": quality.metrics.brightness,
-        "face_size_ratio": quality.metrics.face_size_ratio,
-        "yaw_estimate": quality.metrics.yaw_estimate,
-        "landmark_geometry_valid": quality.metrics.landmark_geometry_valid,
-        "reason_code": quality.reason_code,
-        "final_result": quality.final_result,
+        "sharpness": details["sharpness"],
+        "brightness": details["brightness"],
+        "face_size_ratio": details["face_size_ratio"],
+        "pose": details["pose"],
+        "landmark_geometry_valid": details["landmark_valid"],
+        "failed_checks": details["failed_checks"],
+        "reason_code": quality["reason_code"],
+        "final_result": "PASS" if quality["passed"] else "FAIL",
+        "quality_status": quality["status"],
+        "message": quality["message"],
     }
 
 

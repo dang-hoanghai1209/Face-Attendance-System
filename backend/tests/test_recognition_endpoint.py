@@ -1,6 +1,5 @@
 import io
 import importlib
-import json
 import os
 import unittest
 from datetime import date, time
@@ -17,10 +16,9 @@ import main
 from database import Base, SessionLocal, engine
 from models.attendance import Attendance
 from models.recognition_attempt import RecognitionAttempt
-from models.security_alert import SecurityAlert
 from models.session import Session as ClassSession
 from models.student import Student
-from services import attendance_service, report_service, security_alert_service
+from services import attendance_service, report_service
 
 
 class RecognitionEndpointTests(unittest.TestCase):
@@ -225,19 +223,23 @@ class RecognitionEndpointTests(unittest.TestCase):
             "reason_code": "LOW_SHARPNESS",
             "final_result": "FACE_UNCLEAR",
             "passed": False,
+            "message": main.FACE_UNCLEAR_MESSAGE,
             "metrics": {
                 "sharpness": 2.0,
                 "brightness": 120.0,
                 "face_size_ratio": 0.2,
-                "yaw_estimate": 0.0,
-                "landmark_geometry_valid": True,
+                "detection_confidence": 0.98,
+                "failed_checks": ["LOW_SHARPNESS"],
             },
         }
         main.image_bytes_to_face_embeddings = lambda _image: self.fail("Embedding should not run when quality fails")
+        main.match_embedding = lambda *_args, **_kwargs: self.fail("Matching should not run when quality fails")
 
         result = main._recognize_uploaded_face(file=self.upload(b"unclear-image"), session_id=session.id)
 
         self.assertEqual(result["status"], "FACE_UNCLEAR")
+        self.assertFalse(result["success"])
+        self.assertFalse(result["matched"])
         self.assertEqual(result["reason_code"], "LOW_SHARPNESS")
         self.assertTrue(result["retry_allowed"])
         self.assertFalse(result["official_attendance_allowed"])
@@ -250,25 +252,60 @@ class RecognitionEndpointTests(unittest.TestCase):
         self.assertEqual(result["results"], [])
         self.assertEqual(result["face_count"], 1)
         self.assertEqual(result["message"], main.FACE_UNCLEAR_MESSAGE)
+        self.assertEqual(result["quality"]["sharpness"], 2.0)
+        self.assertEqual(result["quality"]["brightness"], 120.0)
+        self.assertEqual(result["quality"]["face_size_ratio"], 0.2)
+        self.assertEqual(result["quality"]["detection_confidence"], 0.98)
+        self.assertEqual(result["quality"]["failed_checks"], ["LOW_SHARPNESS"])
+        self.assertIsNone(result["alert_id"])
+        self.assertIsNone(result["alert_type"])
+        self.assertIsNone(result["snapshot_path"])
         self.assertEqual(self.db.query(Attendance).count(), 0)
-
-        alert = self.db.query(SecurityAlert).filter(SecurityAlert.id == result["alert_id"]).one()
-        self.assertEqual(alert.alert_type, "FACE_UNCLEAR")
-        self.assertEqual(alert.session_id, session.id)
-        self.assertEqual(alert.confidence, 0.98)
-        alert_note = json.loads(alert.note)
-        self.assertEqual(alert_note["reason_code"], "LOW_SHARPNESS")
-        self.assertEqual(alert_note["detection_confidence"], 0.98)
-        self.assertEqual(alert_note["quality"]["sharpness"], 2.0)
-        self.assertEqual(alert_note["quality"]["landmark_geometry_valid"], True)
-        self.assertTrue(alert.captured_img.startswith(f"media/security_snapshots/{session.id}/"))
-        self.assertTrue(alert.captured_img.endswith("_LOW_SHARPNESS.jpg"))
-        saved_path = security_alert_service.BASE_DIR / alert.captured_img
-        self.assertTrue(saved_path.exists())
-        saved_path.unlink()
 
         audit = self.db.query(RecognitionAttempt).filter(RecognitionAttempt.id == result["audit_id"]).first()
         self.assertEqual(audit.status, "FACE_UNCLEAR")
+
+    def test_recognize_quality_pass_continues_embedding_and_matching_flow(self):
+        session = self.add_session()
+        student = self.add_student(student_code="63123456", class_name="63LFW")
+        calls = {"embedding": 0, "matching": 0}
+        main.evaluate_uploaded_face_quality = lambda _image: {
+            "face_detected": True,
+            "face_count": 1,
+            "bbox": {"x": 10, "y": 20, "w": 80, "h": 90},
+            "detection_probability": 0.99,
+            "reason_code": None,
+            "final_result": "PASS",
+            "passed": True,
+            "metrics": {
+                "sharpness": 120.0,
+                "brightness": 130.0,
+                "face_size_ratio": 0.2,
+                "detection_confidence": 0.99,
+                "failed_checks": [],
+            },
+        }
+
+        def fake_embeddings(_image):
+            calls["embedding"] += 1
+            return [{"embedding": torch.ones(512), "bbox": {"x": 1, "y": 2, "w": 3, "h": 4}}]
+
+        def fake_match(embedding, *_args, **_kwargs):
+            calls["matching"] += 1
+            self.assertTrue(torch.equal(embedding, torch.ones(512)))
+            return "success", student.student_code, 0.91
+
+        main.image_bytes_to_face_embeddings = fake_embeddings
+        main.fetch_db_embeddings = lambda _db: [object()]
+        main.match_embedding = fake_match
+
+        result = main._recognize_uploaded_face(file=self.upload(), session_id=session.id)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["student_code"], student.student_code)
+        self.assertTrue(result["recognized"])
+        self.assertEqual(result["confidence"], 0.91)
+        self.assertEqual(calls, {"embedding": 1, "matching": 1})
 
     def test_recognize_liveness_error_returns_spoof_without_recognition(self):
         session = self.add_session()

@@ -46,7 +46,6 @@ from services.auth_service import bootstrap_admin_user, get_current_user, requir
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
 from services.attendance_service import OFFICIAL_ATTENDANCE_BLOCK_MESSAGE
 from services.face_quality_service import evaluate_face_quality, load_face_quality_thresholds_from_env
-from services.security_alert_service import create_alert
 from services.timezone_service import configured_timezone_name, resolved_timezone_name
 
 
@@ -158,25 +157,31 @@ def evaluate_uploaded_face_quality(image_data: bytes):
     face_landmarks = landmarks[index] if landmarks is not None else None
     quality = evaluate_face_quality(
         image,
-        bbox,
-        probability,
-        face_landmarks,
-        thresholds=load_face_quality_thresholds_from_env(),
+        {
+            "bbox": bbox,
+            "detection_confidence": probability,
+            "landmarks": face_landmarks,
+        },
+        config=load_face_quality_thresholds_from_env(),
     )
+    details = quality.get("details", {})
     return {
         "face_detected": True,
         "face_count": len(boxes),
         "bbox": _plain_bbox(bbox),
         "detection_probability": round(probability, 4),
-        "reason_code": quality.reason_code,
-        "final_result": quality.final_result,
-        "passed": quality.passed,
+        "reason_code": quality.get("reason_code"),
+        "final_result": quality.get("status"),
+        "passed": quality.get("passed", False),
+        "message": quality.get("message"),
         "metrics": {
-            "sharpness": quality.metrics.sharpness,
-            "brightness": quality.metrics.brightness,
-            "face_size_ratio": quality.metrics.face_size_ratio,
-            "yaw_estimate": quality.metrics.yaw_estimate,
-            "landmark_geometry_valid": quality.metrics.landmark_geometry_valid,
+            "sharpness": details.get("sharpness"),
+            "brightness": details.get("brightness"),
+            "face_size_ratio": details.get("face_size_ratio"),
+            "detection_confidence": details.get("detection_confidence"),
+            "pose": details.get("pose"),
+            "landmark_valid": details.get("landmark_valid"),
+            "failed_checks": details.get("failed_checks", []),
         },
     }
 
@@ -487,36 +492,26 @@ def _recognize_uploaded_face_multi(
     if quality_result and not quality_result.get("passed", True):
         processing_time_ms = round((perf_counter() - started_at) * 1000, 2)
         reason_code = quality_result.get("reason_code") or "LOW_FACE_QUALITY"
+        message = quality_result.get("message") or FACE_UNCLEAR_MESSAGE
         audit_id = None
-        alert = None
-        if audit_recognition or (official_mode and session_id is not None):
+        if audit_recognition:
             db = SessionLocal()
             try:
-                if audit_recognition:
-                    attempt = _audit_recognition_safely(
-                        db,
-                        session_id=session_id,
-                        confidence=quality_result.get("detection_probability"),
-                        status="FACE_UNCLEAR",
-                        image_path=capture_path,
-                        message=FACE_UNCLEAR_MESSAGE,
-                    )
-                    audit_id = attempt.id if attempt else None
-                if official_mode and session_id is not None:
-                    alert = create_alert(
-                        db,
-                        session_id=session_id,
-                        alert_type="FACE_UNCLEAR",
-                        image_bytes=image_data,
-                        confidence=quality_result.get("detection_probability"),
-                        reason_code=reason_code,
-                        quality_details=quality_result.get("metrics"),
-                    )
+                attempt = _audit_recognition_safely(
+                    db,
+                    session_id=session_id,
+                    confidence=quality_result.get("detection_probability"),
+                    status="FACE_UNCLEAR",
+                    image_path=capture_path,
+                    message=message,
+                )
+                audit_id = attempt.id if attempt else None
             finally:
                 db.close()
 
-        snapshot_path = alert.captured_img if alert else None
         return {
+            "success": False,
+            "matched": False,
             "status": "FACE_UNCLEAR",
             "student_id": None,
             "student_code": None,
@@ -536,7 +531,7 @@ def _recognize_uploaded_face_multi(
             "liveness_threshold": liveness_threshold,
             "liveness_debug": liveness_debug,
             "official_attendance_allowed": False,
-            "official_attendance_warning": FACE_UNCLEAR_MESSAGE,
+            "official_attendance_warning": message,
             "official_attendance_warning_code": "FACE_UNCLEAR",
             "recognized": False,
             "reason": "FACE_UNCLEAR",
@@ -546,15 +541,15 @@ def _recognize_uploaded_face_multi(
             "processing_time_ms": processing_time_ms,
             "processing_ms": processing_time_ms,
             "audit_id": audit_id,
-            "alert_id": alert.id if alert else None,
-            "alert_type": alert.alert_type if alert else None,
-            "snapshot_path": snapshot_path,
+            "alert_id": None,
+            "alert_type": None,
+            "snapshot_path": None,
             "capture_path": capture_path,
             "bbox": quality_result.get("bbox"),
-            "quality": quality_result,
+            "quality": quality_result.get("metrics", {}),
             "results": [],
             "face_count": quality_result.get("face_count", 0),
-            "message": FACE_UNCLEAR_MESSAGE,
+            "message": message,
         }
 
     try:

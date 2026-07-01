@@ -614,6 +614,7 @@ export default function Sessions() {
   const alertImagePreviewUrlRef = useRef(null)
   const [exportingSessionId, setExportingSessionId] = useState(null)
   const [exportType,         setExportType]         = useState(null)
+  const [alertSearch,        setAlertSearch]        = useState('')
 
   const closeAlertImagePreview = () => {
     if (alertImagePreviewUrlRef.current) {
@@ -642,6 +643,7 @@ export default function Sessions() {
   const closeAlertModal = () => {
     closeAlertImagePreview()
     setAlertModalTarget(null)
+    setAlertSearch('')
   }
 
   const loadAlertCounts = async (sessionsList) => {
@@ -1040,6 +1042,7 @@ export default function Sessions() {
     setAlertModalTarget(session)
     setAlertFilter('active')
     setAlertMessage('')
+    setAlertSearch('')
     loadAlerts(session.id, 'active')
   }
 
@@ -1159,6 +1162,16 @@ export default function Sessions() {
     })
     return chars.join('')
   }
+
+  const filteredActiveAlerts = useMemo(() => {
+    const term = alertSearch.trim().toLowerCase()
+    if (!term) return activeAlerts
+    return activeAlerts.filter(al => {
+      const studentCode = String(al?.student_code || '').toLowerCase()
+      const fullName = String(al?.full_name || '').toLowerCase()
+      return studentCode.includes(term) || fullName.includes(term)
+    })
+  }, [activeAlerts, alertSearch])
 
   // ---------------------------------------------------------------- //
   // Render
@@ -2338,59 +2351,77 @@ export default function Sessions() {
 
             {/* Alerts list wrapper */}
             <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: 240 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--bdr2)', paddingBottom: '8px' }}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => {
-                      setAlertFilter('active');
-                      if (alertModalTarget) loadAlerts(alertModalTarget.id, 'active');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '11px',
-                      minHeight: 'auto',
-                      borderRadius: '4px',
-                      background: alertFilter === 'active' ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
-                      borderColor: alertFilter === 'active' ? 'rgba(0, 201, 167, 0.35)' : 'rgba(255,255,255,0.1)',
-                      color: alertFilter === 'active' ? 'var(--teal)' : 'var(--muted)',
-                    }}
-                  >
-                    Chưa xử lý
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAlertFilter('all');
-                      if (alertModalTarget) loadAlerts(alertModalTarget.id, 'all');
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      fontSize: '11px',
-                      minHeight: 'auto',
-                      borderRadius: '4px',
-                      background: alertFilter === 'all' ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
-                      borderColor: alertFilter === 'all' ? 'rgba(0, 201, 167, 0.35)' : 'rgba(255,255,255,0.1)',
-                      color: alertFilter === 'all' ? 'var(--teal)' : 'var(--muted)',
-                    }}
-                  >
-                    Tất cả
-                  </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderBottom: '1px solid var(--bdr2)', paddingBottom: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => {
+                        setAlertFilter('active');
+                        if (alertModalTarget) loadAlerts(alertModalTarget.id, 'active');
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        minHeight: 'auto',
+                        borderRadius: '4px',
+                        background: alertFilter === 'active' ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
+                        borderColor: alertFilter === 'active' ? 'rgba(0, 201, 167, 0.35)' : 'rgba(255,255,255,0.1)',
+                        color: alertFilter === 'active' ? 'var(--teal)' : 'var(--muted)',
+                      }}
+                    >
+                      Chưa xử lý
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAlertFilter('all');
+                        if (alertModalTarget) loadAlerts(alertModalTarget.id, 'all');
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        minHeight: 'auto',
+                        borderRadius: '4px',
+                        background: alertFilter === 'all' ? 'rgba(0, 201, 167, 0.15)' : 'transparent',
+                        borderColor: alertFilter === 'all' ? 'rgba(0, 201, 167, 0.35)' : 'rgba(255,255,255,0.1)',
+                        color: alertFilter === 'all' ? 'var(--teal)' : 'var(--muted)',
+                      }}
+                    >
+                      Tất cả
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '12px', color: 'var(--white2)', fontWeight: 'bold' }}>
+                    Số lượng: {filteredActiveAlerts.length}
+                  </span>
                 </div>
-                <span style={{ fontSize: '12px', color: 'var(--white2)', fontWeight: 'bold' }}>
-                  Số lượng: {activeAlerts.length}
-                </span>
+                <input
+                  type="text"
+                  placeholder="Tìm theo Mã SV hoặc Tên sinh viên..."
+                  value={alertSearch}
+                  onChange={(e) => setAlertSearch(e.target.value)}
+                  style={{
+                    width: '100%',
+                    minHeight: '34px',
+                    fontSize: '12px',
+                    padding: '6px 10px',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid var(--bdr)',
+                    borderRadius: '6px',
+                    color: 'var(--white)'
+                  }}
+                />
               </div>
 
-              {alertLoading && activeAlerts.length === 0 ? (
+              {alertLoading && filteredActiveAlerts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted)', fontSize: 13 }}>
                   Đang tải danh sách cảnh báo...
                 </div>
-              ) : activeAlerts.length === 0 ? (
+              ) : filteredActiveAlerts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--muted)', fontSize: 13, border: '1px dashed var(--bdr)', borderRadius: 8 }}>
-                  Không có cảnh báo phù hợp.
+                  {alertSearch ? 'Không tìm thấy cảnh báo khớp với từ khóa tìm kiếm.' : 'Không có cảnh báo phù hợp.'}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {activeAlerts.map((rawAlert, index) => {
+                  {filteredActiveAlerts.map((rawAlert, index) => {
                     const al = rawAlert || {}
                     const style = getAlertCardStyle(al.alert_type)
                     const parsedNote = parseNoteSafely(al.note)

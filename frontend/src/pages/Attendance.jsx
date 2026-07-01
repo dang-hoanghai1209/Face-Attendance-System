@@ -56,6 +56,65 @@ const formatDT = (iso) => {
   return `${dd}/${mm} ${hh}:${min}`
 }
 
+const getFaceUnclearFriendlyTip = (reasonCode) => {
+  switch (reasonCode) {
+    case 'LOW_SHARPNESS':
+      return 'Vui lòng giữ điện thoại yên và lau sạch bụi bẩn trên ống kính camera trước khi quét lại.';
+    case 'LOW_BRIGHTNESS':
+      return 'Không gian đang bị thiếu sáng. Vui lòng di chuyển đến khu vực có đèn sáng tốt hơn.';
+    case 'HIGH_BRIGHTNESS':
+      return 'Vùng mặt bị lóa sáng quá mức. Hãy đổi góc đứng để giảm thiểu ánh sáng mạnh chiếu thẳng vào mặt.';
+    case 'FACE_TOO_SMALL':
+      return 'Khuôn mặt bạn đang ở quá xa. Hãy đứng gần lại camera để khuôn mặt vừa vặn trong khung hình.';
+    case 'POSE_OUT_OF_RANGE':
+      return 'Vui lòng nhìn thẳng, giữ khuôn mặt song song với camera (không nghiêng đầu quá nhiều).';
+    case 'LANDMARK_MISSING':
+      return 'Không nhận dạng đầy đủ các nét mặt. Hãy tháo khẩu trang, kính râm hoặc tóc che phủ mắt.';
+    case 'LANDMARK_GEOMETRY_INVALID':
+      return 'Góc nghiêng mặt chưa phù hợp. Vui lòng điều chỉnh góc nghiêng đầu và nhìn thẳng.';
+    case 'LOW_DETECTION_CONFIDENCE':
+      return 'Camera chưa nhận dạng rõ khuôn mặt. Vui lòng đứng yên và căn chỉnh khuôn mặt vào giữa.';
+    case 'LOW_FACE_QUALITY':
+      return 'Chất lượng ảnh mặt chưa đạt yêu cầu. Vui lòng tháo khẩu trang, giữ máy yên ở khu vực đủ sáng.';
+    default:
+      return 'Đưa mặt vào giữa khung hình, đảm bảo đủ ánh sáng, nhìn thẳng camera và thử lại.';
+  }
+}
+
+const CameraHelperChecklist = () => (
+  <div style={{
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: '8px',
+    padding: '12px',
+    marginTop: '12px',
+    fontSize: '12px',
+    color: 'rgba(258, 250, 252, 0.7)'
+  }}>
+    <div style={{ fontWeight: 'bold', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px', color: '#fff' }}>
+      <span>📸</span> Hướng dẫn để nhận diện tốt nhất:
+    </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+        <span style={{ color: '#2dd4bf' }}>✓</span>
+        <span><strong>Đủ ánh sáng:</strong> Đảm bảo khuôn mặt của bạn sáng rõ, tránh ngược sáng.</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+        <span style={{ color: '#2dd4bf' }}>✓</span>
+        <span><strong>Không che mặt:</strong> Tháo khẩu trang, kính râm, hoặc mũ nếu che khuất mắt.</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+        <span style={{ color: '#2dd4bf' }}>✓</span>
+        <span><strong>Nhìn thẳng:</strong> Hướng mắt nhìn trực diện vào ống kính camera.</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+        <span style={{ color: '#2dd4bf' }}>✓</span>
+        <span><strong>Vị trí:</strong> Đứng ở khoảng cách phù hợp (giữa khung hình).</span>
+      </div>
+    </div>
+  </div>
+)
+
 const formatDateStr = (dateStr) => {
   if (!dateStr) return ''
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr
@@ -1505,6 +1564,7 @@ export default function Attendance() {
                 <span className="badge info">Lần quét gần nhất: {formatScanTime(lastAutoScanAt)}</span>
                 {isProcessingFrame && <span className="badge warning">Đang xử lý...</span>}
               </div>
+              <CameraHelperChecklist />
             </div>
           </div>
         )
@@ -1554,9 +1614,24 @@ export default function Attendance() {
               )}
 
               {result?.status === 'FACE_UNCLEAR' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
-                  <div style={{ fontWeight: 600, color: style.accent }}>Hướng dẫn:</div>
-                  <div style={{ fontSize: '13px', lineHeight: '1.5' }}>{result.guidance}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px' }}>
+                  <div style={{ fontWeight: 600, color: style.accent, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>💡</span> Khuyến nghị khắc phục:
+                  </div>
+                  <div style={{
+                    background: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                    borderRadius: '6px',
+                    padding: '10px',
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    color: '#fef3c7'
+                  }}>
+                    {getFaceUnclearFriendlyTip(result.reasonCode)}
+                  </div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.5', opacity: 0.85 }}>
+                    <strong>Hướng dẫn chung:</strong> {result.guidance}
+                  </div>
                   {(result.detectionConfidencePercent || result.reasonCode) && (
                     <div style={{ 
                       marginTop: '8px', 
@@ -1791,6 +1866,7 @@ export default function Attendance() {
                   <span className="badge info">Lần quét gần nhất: {formatScanTime(lastAutoScanAt)}</span>
                   {isProcessingFrame && <span className="badge warning">Đang xử lý...</span>}
                 </div>
+                <CameraHelperChecklist />
 
                 {result && (
                   <div style={{
@@ -1803,8 +1879,23 @@ export default function Attendance() {
                     
                     {result.status === 'FACE_UNCLEAR' ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px', marginBottom: '12px' }}>
-                        <div style={{ fontWeight: 600, color: getStyle(result.status).accent }}>Hướng dẫn:</div>
-                        <div style={{ fontSize: '13px', lineHeight: '1.5' }}>{result.guidance}</div>
+                        <div style={{ fontWeight: 600, color: getStyle(result.status).accent, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>💡</span> Khuyến nghị khắc phục:
+                        </div>
+                        <div style={{
+                          background: 'rgba(245, 158, 11, 0.08)',
+                          border: '1px solid rgba(245, 158, 11, 0.25)',
+                          borderRadius: '6px',
+                          padding: '10px',
+                          fontSize: '13px',
+                          lineHeight: '1.5',
+                          color: '#fef3c7'
+                        }}>
+                          {getFaceUnclearFriendlyTip(result.reasonCode)}
+                        </div>
+                        <div style={{ fontSize: '13px', lineHeight: '1.5', opacity: 0.85 }}>
+                          <strong>Hướng dẫn chung:</strong> {result.guidance}
+                        </div>
                         
                         {(result.detectionConfidencePercent || result.reasonCode) && (
                           <div style={{ 

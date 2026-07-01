@@ -30,6 +30,54 @@ DEFAULT_FACE_QUALITY_CONFIG = {
 }
 
 
+def validate_face_quality_config(config: Optional[dict[str, Any]] = None) -> dict:
+    values = dict(DEFAULT_FACE_QUALITY_CONFIG)
+    if config:
+        values.update(config)
+
+    errors = []
+    _validate_min(values, "min_sharpness", 0.0, errors)
+    _validate_range(values, "min_brightness", 0.0, 255.0, errors)
+    _validate_range(values, "max_brightness", 0.0, 255.0, errors)
+    if _to_number(values.get("min_brightness")) is not None and _to_number(values.get("max_brightness")) is not None:
+        if float(values["min_brightness"]) > float(values["max_brightness"]):
+            errors.append("min_brightness must be less than or equal to max_brightness")
+    _validate_range(values, "min_face_size_ratio", 0.0, 1.0, errors)
+    _validate_range(values, "min_detection_confidence", 0.0, 1.0, errors)
+    _validate_min(values, "max_abs_yaw", 0.0, errors)
+    _validate_min(values, "max_abs_pitch", 0.0, errors)
+    _validate_min(values, "max_abs_roll", 0.0, errors)
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "config": values,
+    }
+
+
+def _validate_min(values: dict[str, Any], key: str, minimum: float, errors: list[str]) -> None:
+    number = _to_number(values.get(key))
+    if number is None:
+        errors.append(f"{key} must be a number")
+    elif number < minimum:
+        errors.append(f"{key} must be >= {minimum}")
+
+
+def _validate_range(values: dict[str, Any], key: str, minimum: float, maximum: float, errors: list[str]) -> None:
+    number = _to_number(values.get(key))
+    if number is None:
+        errors.append(f"{key} must be a number")
+    elif number < minimum or number > maximum:
+        errors.append(f"{key} must be between {minimum} and {maximum}")
+
+
+def _to_number(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class FaceQualityReason(str, Enum):
     LOW_SHARPNESS = "LOW_SHARPNESS"
     LOW_BRIGHTNESS = "LOW_BRIGHTNESS"

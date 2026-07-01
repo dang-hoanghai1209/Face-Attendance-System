@@ -26,6 +26,30 @@ MULTI_FRAME_REASON_CODES = {
 }
 
 
+def validate_multi_frame_voting_config(config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    values = dict(MULTI_FRAME_VOTING_CONFIG)
+    if config:
+        values.update(config)
+
+    errors: list[str] = []
+    _validate_int_min(values, "min_total_frames", 1, errors)
+    _validate_int_min(values, "min_quality_frames", 1, errors)
+    min_total_frames = _to_float(values.get("min_total_frames"), default=None)
+    min_quality_frames = _to_float(values.get("min_quality_frames"), default=None)
+    if min_total_frames is not None and min_quality_frames is not None and min_quality_frames > min_total_frames:
+        errors.append("min_quality_frames must be less than or equal to min_total_frames")
+    _validate_ratio(values, "min_agreement_ratio", errors)
+    _validate_ratio(values, "min_confidence", errors)
+    _validate_float_min(values, "min_margin", 0.0, errors)
+    _validate_ratio(values, "max_unclear_ratio", errors)
+
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "config": values,
+    }
+
+
 STATUS_RECOGNIZED = "RECOGNIZED"
 STATUS_UNCERTAIN = "FACE_UNCERTAIN"
 STATUS_UNCLEAR = "FACE_UNCLEAR"
@@ -185,7 +209,34 @@ def _merge_config(config: Optional[dict[str, Any]]) -> dict[str, Any]:
     thresholds = dict(MULTI_FRAME_VOTING_CONFIG)
     if config:
         thresholds.update(config)
+    validation = validate_multi_frame_voting_config(thresholds)
+    if not validation["valid"]:
+        raise ValueError("; ".join(validation["errors"]))
     return thresholds
+
+
+def _validate_int_min(values: dict[str, Any], key: str, minimum: int, errors: list[str]) -> None:
+    value = values.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        errors.append(f"{key} must be an integer")
+    elif value < minimum:
+        errors.append(f"{key} must be >= {minimum}")
+
+
+def _validate_float_min(values: dict[str, Any], key: str, minimum: float, errors: list[str]) -> None:
+    value = _to_float(values.get(key), default=None)
+    if value is None:
+        errors.append(f"{key} must be a number")
+    elif value < minimum:
+        errors.append(f"{key} must be >= {minimum}")
+
+
+def _validate_ratio(values: dict[str, Any], key: str, errors: list[str]) -> None:
+    value = _to_float(values.get(key), default=None)
+    if value is None:
+        errors.append(f"{key} must be a number")
+    elif value < 0.0 or value > 1.0:
+        errors.append(f"{key} must be between 0.0 and 1.0")
 
 
 def _normalize_frame(frame: dict[str, Any]) -> dict[str, Any]:

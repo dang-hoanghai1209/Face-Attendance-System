@@ -45,7 +45,13 @@ from routes import alerts, attendance, auth, classrooms, course_sections, enroll
 from services.auth_service import bootstrap_admin_user, get_current_user, require_admin
 from services.recognition_audit_service import create_recognition_attempt, save_recognition_capture
 from services.attendance_service import OFFICIAL_ATTENDANCE_BLOCK_MESSAGE
-from services.face_quality_service import evaluate_face_quality, load_face_quality_thresholds_from_env
+from services.face_quality_service import (
+    evaluate_face_quality,
+    face_quality_config_from_env,
+    load_face_quality_thresholds_from_env,
+    validate_face_quality_config,
+)
+from services.multi_frame_voting_service import MULTI_FRAME_VOTING_CONFIG, validate_multi_frame_voting_config
 from services.timezone_service import configured_timezone_name, resolved_timezone_name
 
 
@@ -106,8 +112,16 @@ def read_root():
 
 @app.get("/health")
 def health_check():
+    face_quality_validation = validate_face_quality_config(face_quality_config_from_env())
+    multi_frame_validation = validate_multi_frame_voting_config(MULTI_FRAME_VOTING_CONFIG)
     return {
         "status": "ok",
+        "service": "face-attendance-system",
+        "checks": {
+            "api": "ok",
+            "face_quality_config": "ok" if face_quality_validation["valid"] else "error",
+            "multi_frame_voting_config": "ok" if multi_frame_validation["valid"] else "error",
+        },
         "legacy_embeddings_enabled": ENABLE_LEGACY_EMBEDDINGS,
         "legacy_embeddings_loaded": len(legacy_embeddings),
         "threshold_confirm": THRESHOLD_CONFIRM,
@@ -116,6 +130,10 @@ def health_check():
         "face_models_loaded": face_models_loaded(),
         "timezone": configured_timezone_name(),
         "resolved_timezone": resolved_timezone_name(),
+        "config_errors": {
+            "face_quality_config": face_quality_validation["errors"],
+            "multi_frame_voting_config": multi_frame_validation["errors"],
+        },
     }
 
 
